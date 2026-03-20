@@ -1,0 +1,136 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Notification Center for Laravel Nova",
+  "projectDescription": "A Laravel Nova package providing multi-channel notification delivery with automatic channel escalation, smart retries, audience segmentation, and open/action tracking.",
+  "theme": "linden",
+  "primaryColor": "#7c7c7c",
+  "lightColor": "#060606",
+  "darkColor": "#cccccc",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "installation", "quickstart"]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/notifications",
+              "concepts/channels",
+              "concepts/strategies",
+              "concepts/audiences",
+              "concepts/templates",
+              "concepts/tracking"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/publishing-notifications",
+              "guides/segmentation",
+              "guides/in-app-notifications",
+              "guides/web-push",
+              "guides/whatsapp",
+              "guides/slack-teams"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/strategies",
+              "configuration/deliverability",
+              "configuration/channels"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Models",
+            "pages": [
+              "api/models/notification",
+              "api/models/delivery",
+              "api/models/audience",
+              "api/models/profile",
+              "api/models/subscription"
+            ]
+          },
+          {
+            "group": "Notifications",
+            "pages": [
+              "api/notifications/overview",
+              "api/notifications/nova",
+              "api/notifications/card",
+              "api/notifications/email",
+              "api/notifications/sms",
+              "api/notifications/webpush",
+              "api/notifications/whatsapp",
+              "api/notifications/slack",
+              "api/notifications/teams"
+            ]
+          },
+          {
+            "group": "Jobs & Actions",
+            "pages": [
+              "api/jobs/execute-strategy",
+              "api/jobs/send-delivery",
+              "api/actions/publish-notification",
+              "api/actions/force-delivery"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Changelog",
+        "groups": [
+          {
+            "group": "Releases",
+            "pages": ["changelog"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-channel notification delivery (Nova, Card, Email, SMS, WhatsApp, Web Push, Slack, Teams)",
+    "Automatic channel escalation with configurable timeout thresholds",
+    "Smart retries with escalating delay intervals",
+    "Audience segmentation: static, dynamic, and segment-based audiences",
+    "Five delivery strategies: marketing, transactional, system, alert, reminder",
+    "Built-in open and action tracking with unique slugs per delivery",
+    "Google Analytics GA4 integration for notification tracking",
+    "Time window and day-of-week delivery scheduling",
+    "Laravel Nova dashboard for managing notifications, audiences, and deliveries",
+    "Web push notifications via service workers (HTTPS required)"
+  ],
+  "publicApiSurface": [
+    "Opscale\\NotificationCenter\\Tool",
+    "Opscale\\NotificationCenter\\ToolServiceProvider",
+    "Opscale\\NotificationCenter\\Models\\Notification",
+    "Opscale\\NotificationCenter\\Models\\Delivery",
+    "Opscale\\NotificationCenter\\Models\\Audience",
+    "Opscale\\NotificationCenter\\Models\\Profile",
+    "Opscale\\NotificationCenter\\Models\\Subscription",
+    "Opscale\\NotificationCenter\\Models\\Event",
+    "Opscale\\NotificationCenter\\Notifications\\NovaNotification",
+    "Opscale\\NotificationCenter\\Notifications\\CardNotification",
+    "Opscale\\NotificationCenter\\Notifications\\EmailNotification",
+    "Opscale\\NotificationCenter\\Notifications\\SmsNotification",
+    "Opscale\\NotificationCenter\\Notifications\\CallNotification",
+    "Opscale\\NotificationCenter\\Notifications\\WhatsAppNotification",
+    "Opscale\\NotificationCenter\\Notifications\\WebPushNotification",
+    "Opscale\\NotificationCenter\\Notifications\\SlackNotification",
+    "Opscale\\NotificationCenter\\Notifications\\TeamsNotification",
+    "Opscale\\NotificationCenter\\Jobs\\ExecuteNotificationStrategy",
+    "Opscale\\NotificationCenter\\Jobs\\SendDelivery",
+    "Opscale\\NotificationCenter\\Nova\\Actions\\PublishNotification",
+    "Opscale\\NotificationCenter\\Nova\\Actions\\ForceDelivery",
+    "notification-center:install (artisan command)"
+  ]
+}
