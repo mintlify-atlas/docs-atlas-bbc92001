@@ -81,8 +81,8 @@ To subscribe a user to push notifications, send them a `SubscribeTemplate` maila
 use Opscale\NotificationCenter\Mailables\SubscribeTemplate;
 
 Mail::to($user)->send(new SubscribeTemplate(
-    registerUrl: route('notification-center.webpush.register'),
-    swUrl: asset('service-worker.js'),
+    registerUrl: route('notification-center.webpush.register', $profile->id),
+    swUrl: route('notification-center.webpush.sw'),
     vapidPublicKey: config('webpush.vapid.public_key'),
 ));
 ```

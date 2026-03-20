@@ -37,7 +37,7 @@ Every tracking interaction creates an `Event` record linked to the delivery:
 
 $fillable = [
     'delivery_id',  // FK to the Delivery that was interacted with
-    'name',         // Event name, e.g. "opened" or "action_clicked"
+    'name',         // Event name, e.g. "Opened" or "Verified"
     'payload',      // Optional JSON metadata (e.g., user agent, IP)
 ];
 
@@ -98,3 +98,42 @@ When `GOOGLE_ANALYTICS_ID` is set, the `gtag.js` script is injected into notific
 <Tip>
   Delivery statuses are updated as tracking events are recorded. A delivery moves from `Sent` → `Opened` when the open slug is resolved, and from `Opened` → `Verified` when the action slug is resolved.
 </Tip>
+
+## Service actions
+
+### TrackEvent
+
+`Opscale\NotificationCenter\Services\Actions\TrackEvent` is the internal service that records delivery lifecycle events. It is registered as an event listener for both `NotificationSent` and `NotificationFailed` Laravel events, so delivery statuses update automatically on every send.
+
+It can also be called directly to record custom events:
+
+```php
+use Opscale\NotificationCenter\Services\Actions\TrackEvent;
+
+TrackEvent::run([
+    'delivery_id' => $delivery->id,
+    'event'       => 'Opened',   // Sent | Received | Opened | Verified | Failed | Expired | custom
+    'payload'     => ['ip' => request()->ip()],
+]);
+```
+
+### EnrichGeoData
+
+`Opscale\NotificationCenter\Services\Actions\EnrichGeoData` enriches an existing `Event` record's payload with geolocation data from [ipgeolocation.io](https://ipgeolocation.io). It requires an API key set via:
+
+```php
+// config/notification-center.php (add manually)
+'ipgeolocation' => [
+    'api_key' => env('IPGEOLOCATION_API_KEY'),
+],
+```
+
+```php
+use Opscale\NotificationCenter\Services\Actions\EnrichGeoData;
+
+EnrichGeoData::run(['event_id' => $event->id]);
+```
+
+<Note>
+  `ipgeolocation.api_key` is not part of the default published config. Add it manually if you want to use geo enrichment.
+</Note>

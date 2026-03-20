@@ -5,7 +5,11 @@ description: "Job that executes a single delivery attempt for a specific channel
 
 ## Overview
 
-`Opscale\NotificationCenter\Jobs\SendDelivery` is responsible for sending one notification to one profile via one channel. It is dispatched by `ExecuteNotificationStrategy` and records the outcome through the `TrackEvent` service action, which updates the `Delivery` model's status accordingly.
+`Opscale\NotificationCenter\Jobs\SendDelivery` is responsible for sending one notification to one profile via one channel. It can be dispatched directly for a specific `Delivery` record and records the outcome through the `TrackEvent` service action, which updates the `Delivery` model's status accordingly.
+
+<Note>
+  `ExecuteNotificationStrategy` does not dispatch `SendDelivery` — it calls `$profile->notify()` directly in its internal `sendDelivery()` method. `SendDelivery` is a standalone job you can dispatch independently when you need to re-send a specific delivery record outside the strategy flow.
+</Note>
 
 ```php
 use Opscale\NotificationCenter\Jobs\SendDelivery;

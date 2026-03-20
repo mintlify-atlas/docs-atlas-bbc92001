@@ -23,7 +23,7 @@ If you need to re-publish the config file after an upgrade, use `php artisan ven
 
 The published config file contains four top-level sections:
 
-<Columns cols={2}>
+<CardGroup cols={2}>
   <Card title="messages" icon="envelope">
     Maps channel identifier strings (e.g. `email`, `sms`) to their notification class implementations.
   </Card>
@@ -36,7 +36,7 @@ The published config file contains four top-level sections:
   <Card title="google_analytics" icon="chart-line">
     Your GA4 Measurement ID. When set, the `gtag.js` script is included in rendered notifications.
   </Card>
-</Columns>
+</CardGroup>
 
 ## Full config example
 
@@ -177,7 +177,7 @@ GOOGLE_ANALYTICS_ID=G-XXXXXXXXXX
 
 ## Explore each section
 
-<Columns cols={2}>
+<CardGroup cols={2}>
   <Card title="Delivery strategies" icon="sitemap" href="/configuration/strategies">
     Configure queues, channel ordering, retries, and timeouts for each notification type.
   </Card>
@@ -187,4 +187,4 @@ GOOGLE_ANALYTICS_ID=G-XXXXXXXXXX
   <Card title="Channel configuration" icon="envelope" href="/configuration/channels">
     Register notification classes for each delivery channel and understand external service requirements.
   </Card>
-</Columns>
+</CardGroup>

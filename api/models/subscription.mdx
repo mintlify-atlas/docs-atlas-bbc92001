@@ -1,6 +1,6 @@
 ---
 title: "Subscription model"
-description: "Eloquent model managing a profile's push notification subscription for the webpush channel."
+description: "Eloquent model storing a profile's verified contact point for a notification channel."
 ---
 
 ## Class
@@ -13,9 +13,9 @@ Extends `Illuminate\Database\Eloquent\Model`. Uses `HasUlids`, `SoftDeletes`, an
 
 ## Overview
 
-A `Subscription` record stores a single verified contact point for a `Profile` on a specific notification channel. The most common use case is webpush: when a user registers a service worker in their browser, the resulting push subscription endpoint and keys are stored here so the `webpush` channel can locate the correct push target at dispatch time.
+A `Subscription` record stores a single verified contact point for a `Profile` on a specific notification channel. Each subscription has a `type` (the channel identifier, e.g. `'webpush'`, `'sms'`, `'email'`) and a `contact` value (the endpoint, phone number, or address for that channel). 
 
-Multiple subscriptions per profile are supported (e.g. a user might have a mail subscription and a webpush subscription, or webpush subscriptions from multiple devices). A unique constraint on `(profile_id, type, contact)` prevents duplicates.
+Multiple subscriptions per profile are supported — a user might have a webpush subscription, an SMS subscription, and an email subscription. A unique constraint on `(profile_id, type, contact)` prevents duplicates.
 
 ## Attributes
 
@@ -28,14 +28,15 @@ Multiple subscriptions per profile are supported (e.g. a user might have a mail 
 </ResponseField>
 
 <ResponseField name="type" type="string" required>
-  The notification channel this subscription applies to (e.g. `'webpush'`, `'mail'`, `'vonage'`).
+  The notification channel this subscription applies to (e.g. `'webpush'`, `'email'`, `'sms'`). Matches the channel identifier keys used in `config('notification-center.messages')`.
 </ResponseField>
 
 <ResponseField name="contact" type="string" required>
-  The channel-specific contact address or endpoint:
+  The channel-specific contact address or endpoint. For example:
   - **webpush** — the push subscription endpoint URL registered by the service worker.
-  - **mail** — the recipient email address.
-  - **vonage / SMS** — the recipient phone number.
+  - **email** — the recipient email address.
+  - **sms / call / whatsapp** — the recipient phone number.
+  - **nova / card** — the primary key of the notifiable user model.
 </ResponseField>
 
 <ResponseField name="verified" type="boolean">
@@ -89,8 +90,8 @@ const subscription = await registration.pushManager.subscribe({
     applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
 });
 
-// POST the subscription object to your Laravel endpoint
-await fetch('/push-subscriptions', {
+// POST the subscription object to the Notification Center register endpoint
+await fetch(`/webpush/register/${profileId}`, {
     method: 'POST',
     body: JSON.stringify(subscription),
     headers: { 'Content-Type': 'application/json' },
@@ -110,23 +111,32 @@ $profile->updatePushSubscription(
   `updatePushSubscription()` is provided by the `HasPushSubscriptions` trait and will create or update the subscription record automatically, preventing duplicates.
 </Note>
 
-## Usage with webpush notifications
+## Usage with notification routing
 
-The `Profile::routeNotificationFor()` method checks whether the dispatched notification implements `getSubscription()`. If so, it returns that subscription directly to the webpush channel driver:
+The `Profile::routeNotificationFor()` method checks whether the dispatched notification implements `getSubscription()`. If so, it returns that subscription value directly to the channel driver instead of delegating to the default `Notifiable` routing:
 
 ```php
-// Inside your notification class
-public function getSubscription(): Subscription
+// Profile::routeNotificationFor() — from src/Models/Profile.php
+public function routeNotificationFor($driver, $notification = null): mixed
 {
-    return $this->subscription;
-}
+    if ($notification && method_exists($notification, 'getSubscription')) {
+        return $notification->getSubscription();
+    }
 
-public function toWebPush(Profile $profile, $notification): WebPushMessage
+    return parent::routeNotificationFor($driver, $notification);
+}
+```
+
+All built-in notification classes inherit `getSubscription()` from the base `Notification` class, which looks up the matching `Subscription` record by channel type:
+
+```php
+// Base Notification::getSubscription()
+public function getSubscription(): mixed
 {
-    return (new WebPushMessage)
-        ->title($this->title)
-        ->body($this->body)
-        ->action('View', $this->actionUrl);
+    return $this->delivery->profile->subscriptions
+        ->where('type', $this->delivery->channel)
+        ->first()
+        ?->contact;
 }
 ```
 
