@@ -1,0 +1,130 @@
+---
+title: "WhatsApp notifications"
+description: "Send WhatsApp messages via Twilio Content Templates using the whatsapp channel."
+---
+
+The `whatsapp` channel sends WhatsApp messages through Twilio's API using pre-approved Content Templates. It depends on the [laravel-notification-channels/twilio](https://github.com/laravel-notification-channels/twilio) package.
+
+## Prerequisites
+
+- A Twilio account with WhatsApp messaging enabled.
+- A Twilio Content Template SID (created in the Twilio Console under Content Templates).
+- The `laravel-notification-channels/twilio` package installed.
+
+## Installation
+
+```bash
+composer require laravel-notification-channels/twilio
+```
+
+Add your Twilio credentials to `.env`:
+
+```bash
+TWILIO_USERNAME=your_account_sid
+TWILIO_PASSWORD=your_auth_token
+TWILIO_FROM=whatsapp:+14155238886
+```
+
+## Twilio Content Template SID
+
+WhatsApp messages must use a Twilio-approved Content Template. Set the template SID in your environment:
+
+```bash
+TWILIO_WHATSAPP_CONTENT_SID=HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+This value is read by the config:
+
+```php
+// config/notification-center.php
+'whatsapp_content_sid' => env('TWILIO_WHATSAPP_CONTENT_SID'),
+```
+
+<Note>
+  Content Template SIDs start with `HX`. Create and manage templates in the [Twilio Console](https://console.twilio.com) under **Messaging → Content Template Builder**. Templates must be approved by WhatsApp before use.
+</Note>
+
+## The WhatsAppNotification class
+
+```php
+// src/Notifications/WhatsAppNotification.php
+public function via(object $notifiable): array
+{
+    return [TwilioChannel::class];
+}
+
+public function toTwilio(object $notifiable): TwilioContentTemplateMessage
+{
+    $model = $this->delivery->notification;
+    $data  = [
+        1 => $model->summary,
+        2 => $this->delivery->open_slug,
+    ];
+
+    return (new TwilioContentTemplateMessage)
+        ->contentSid(config('notification-center.whatsapp_content_sid'))
+        ->contentVariables($data);
+}
+```
+
+The message passes two variables to the Content Template:
+
+| Variable index | Value |
+|---|---|
+| `1` | `$model->summary` — the notification's short text |
+| `2` | `$this->delivery->open_slug` — tracking slug for open tracking |
+
+Your Twilio Content Template should reference these as `{{1}}` and `{{2}}` respectively.
+
+## Registering the channel
+
+Map the `whatsapp` identifier to the notification class in your config:
+
+```php
+// config/notification-center.php
+'messages' => [
+    'whatsapp' => \Opscale\NotificationCenter\Notifications\WhatsAppNotification::class,
+    // ...
+],
+```
+
+Then include it in a delivery strategy. The default `alert` strategy uses WhatsApp as a fallback after web push:
+
+```php
+// config/notification-center.php
+'alert' => [
+    'queue'               => 'notifications-alert',
+    'channels'            => ['webpush', 'whatsapp', 'card'],
+    'retry_interval'      => [30, 300, 900],
+    'max_attempts'        => 3,
+    'timeout_per_channel' => 1,
+    'days'                => [0, 1, 2, 3, 4, 5, 6],
+    'hours'               => ['00:00', '23:59'],
+],
+```
+
+In this strategy, if `webpush` times out (after 1 hour), delivery escalates to `whatsapp`, and then to `card`.
+
+## Example: reminder strategy with WhatsApp
+
+```php
+'reminder' => [
+    'queue'               => 'notifications-reminder',
+    'channels'            => ['webpush', 'whatsapp'],
+    'retry_interval'      => [1800],
+    'max_attempts'        => 2,
+    'timeout_per_channel' => 6,
+    'days'                => [1, 2, 3, 4, 5],
+    'hours'               => ['09:00', '19:00'],
+],
+```
+
+Reminders attempt web push first, then escalate to WhatsApp after a 6-hour timeout, retrying up to twice with a 30-minute interval.
+
+<Tip>
+  WhatsApp is well-suited for time-sensitive channels like `alert` and `reminder` because it reaches users on their mobile devices even when they are not actively browsing your web app.
+</Tip>
+
+<Warning>
+  WhatsApp via Twilio requires that the recipient's phone number is registered as a profile contact. Ensure your `Profile` records include the user's WhatsApp-enabled phone number through your notifiable model's `routeNotificationForTwilio()` method.
+</Warning>

@@ -1,0 +1,86 @@
+---
+title: "CardNotification"
+description: "Renders notifications as visual cards on the Notifications Dashboard."
+---
+
+**Class:** `Opscale\NotificationCenter\Notifications\CardNotification`  
+**Channel identifier:** `card`  
+**Underlying driver:** `card` (Notification Center custom channel)
+
+`CardNotification` renders a delivery as a visual card on the Notification Center dashboard. Cards display a title, subtitle, colour variant badge, and an optional action button.
+
+## Method signatures
+
+```php
+class CardNotification extends Notification
+{
+    public function via(object $notifiable): array
+
+    public function toCard(object $notifiable): NotificationCard
+
+    public function getSubscription(): mixed
+
+    protected function getVariant(string $type): string
+}
+```
+
+### `via()`
+
+Returns `['card']`, which routes the notification through the Notification Center's internal card channel.
+
+### `toCard(object $notifiable): NotificationCard`
+
+Builds and returns a `NotificationCard` instance. The payload fields are:
+
+| Field | Source |
+|---|---|
+| Title | `$delivery->notification->subject` |
+| Subtitle | `$delivery->notification->summary` |
+| Variant | Resolved from `$delivery->notification->type->value` via `getVariant()` |
+| Action label | `View` (translated) |
+| Action URL | Tracking open route for `$delivery->open_slug` |
+| Action target | `_blank` |
+
+### `getSubscription(): mixed`
+
+Overrides the base class to return the notifiable model instance. It resolves the contact from the profile's subscription list, then calls `find()` on the notifiable's Eloquent model.
+
+### `getVariant(string $type): string`
+
+Maps the notification type to a card colour variant:
+
+| Type value | Variant |
+|---|---|
+| `Alert` | `danger` |
+| `System` | `warning` |
+| _(default)_ | `primary` |
+
+## What data it sends
+
+The `NotificationCard` object passed to the dashboard contains:
+
+- A title string from the notification's `subject`
+- A subtitle string from the notification's `summary`
+- A colour variant derived from the notification type
+- A "View" action button linking to the tracked open URL (opens in a new tab)
+
+## Usage example
+
+The `card` channel is used in the `alert` strategy by default:
+
+```php
+// config/notification-center.php
+'strategies' => [
+    'alert' => [
+        'queue'    => 'notifications-alert',
+        'channels' => ['webpush', 'whatsapp', 'card'],
+        // ...
+    ],
+],
+```
+
+When a delivery is dispatched and reaches the `card` channel step, `CardNotification` is instantiated with the `Delivery` model and a `NotificationCard` is persisted to the dashboard.
+
+<Info>
+`CardNotification` uses a custom channel driver internal to the Notification Center. No additional third-party package is required.
+</Info>

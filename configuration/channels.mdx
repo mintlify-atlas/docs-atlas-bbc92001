@@ -1,0 +1,162 @@
+---
+title: "Channel configuration"
+description: "Configure the messages map to register notification classes for each delivery channel."
+---
+
+The `messages` key in `config/notification-center.php` maps channel identifier strings to PHP notification classes. When the delivery engine dispatches a notification, it looks up the channel identifier in this map and instantiates the corresponding class.
+
+## The `messages` config key
+
+```php config/notification-center.php
+'messages' => [
+    'nova'     => \Opscale\NotificationCenter\Notifications\NovaNotification::class,
+    'card'     => \Opscale\NotificationCenter\Notifications\CardNotification::class,
+    'email'    => \Opscale\NotificationCenter\Notifications\EmailNotification::class,
+    'sms'      => \Opscale\NotificationCenter\Notifications\SmsNotification::class,
+    'call'     => \Opscale\NotificationCenter\Notifications\CallNotification::class,
+    'whatsapp' => \Opscale\NotificationCenter\Notifications\WhatsAppNotification::class,
+    'webpush'  => \Opscale\NotificationCenter\Notifications\WebPushNotification::class,
+    'slack'    => \Opscale\NotificationCenter\Notifications\SlackNotification::class,
+    'teams'    => \Opscale\NotificationCenter\Notifications\TeamsNotification::class,
+],
+```
+
+Each key must match the channel identifier string used in strategy `channels` arrays. If a channel identifier appears in a strategy but has no corresponding entry in `messages`, the delivery is silently skipped.
+
+## Built-in channels
+
+The package ships with nine pre-registered channels:
+
+| Identifier | Class | Description |
+|---|---|---|
+| `nova` | `NovaNotification` | In-app Laravel Nova notification bell |
+| `card` | `CardNotification` | Nova dashboard card notification |
+| `email` | `EmailNotification` | Standard email delivery |
+| `sms` | `SmsNotification` | SMS via Twilio |
+| `call` | `CallNotification` | Voice call via Twilio |
+| `whatsapp` | `WhatsAppNotification` | WhatsApp message via Twilio |
+| `webpush` | `WebPushNotification` | Browser web push notification |
+| `slack` | `SlackNotification` | Slack message via webhook or API |
+| `teams` | `TeamsNotification` | Microsoft Teams message |
+
+## External service requirements
+
+Some channels require external service credentials before they will deliver successfully:
+
+<AccordionGroup>
+  <Accordion title="sms, call, whatsapp — Twilio">
+    The `sms`, `call`, and `whatsapp` channels use Twilio. Configure your Twilio credentials in your Laravel services config or `.env`:
+
+    ```ini .env
+    TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    TWILIO_AUTH_TOKEN=your_auth_token
+    TWILIO_FROM=+15005550006
+    ```
+
+    The `whatsapp` channel additionally requires a Content Template SID set in the notification-center config:
+
+    ```ini .env
+    TWILIO_WHATSAPP_CONTENT_SID=HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    ```
+  </Accordion>
+
+  <Accordion title="webpush — VAPID keys">
+    The `webpush` channel requires VAPID key pairs for the Web Push Protocol. Generate and configure them:
+
+    ```ini .env
+    VAPID_PUBLIC_KEY=your_vapid_public_key
+    VAPID_PRIVATE_KEY=your_vapid_private_key
+    ```
+  </Accordion>
+
+  <Accordion title="slack — Slack app or webhook">
+    The `slack` channel requires either an incoming webhook URL or a Slack Bot Token, depending on your integration method. Configure these according to your Laravel Slack notification driver setup.
+  </Accordion>
+
+  <Accordion title="teams — Microsoft Teams webhook">
+    The `teams` channel requires an incoming webhook URL configured in your Microsoft Teams channel. Provide the webhook URL through your application's configuration.
+  </Accordion>
+
+  <Accordion title="nova, card — no external service required">
+    The `nova` and `card` channels deliver entirely within your Laravel Nova installation and require no external credentials.
+  </Accordion>
+</AccordionGroup>
+
+## Adding a custom channel
+
+To add a custom delivery channel, create a notification class that extends the base `Notification` class, then register it in the `messages` config.
+
+<Steps>
+  <Step title="Create your notification class">
+    Extend `Opscale\NotificationCenter\Notifications\Notification` and implement your delivery logic. The base class injects the `Delivery` model and wires up the queue, retry count, and backoff automatically from the matching strategy config.
+
+    ```php app/Notifications/PushoverNotification.php
+    <?php
+
+    namespace App\Notifications;
+
+    use Opscale\NotificationCenter\Notifications\Notification;
+    use Opscale\NotificationCenter\Models\Delivery;
+
+    class PushoverNotification extends Notification
+    {
+        public function toPushover(object $notifiable): array
+        {
+            return [
+                'message' => $this->delivery->notification->body,
+                'title'   => $this->delivery->notification->subject,
+            ];
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Register the channel in config">
+    Add the new identifier and class to the `messages` array:
+
+    ```php config/notification-center.php
+    'messages' => [
+        // ... built-in channels
+        'pushover' => \App\Notifications\PushoverNotification::class,
+    ],
+    ```
+  </Step>
+
+  <Step title="Use the channel in a strategy">
+    Reference the new identifier string in any strategy's `channels` array:
+
+    ```php config/notification-center.php
+    'alert' => [
+        'channels' => ['webpush', 'pushover', 'whatsapp'],
+        // ...
+    ],
+    ```
+  </Step>
+</Steps>
+
+<Note>
+The channel identifier string in `messages` must exactly match the string used in the strategy `channels` array and the `Delivery` model's `channel` column. A mismatch will cause the delivery to be silently skipped.
+</Note>
+
+## How the delivery engine resolves channels
+
+When `ExecuteNotificationStrategy` processes a recipient, it:
+
+1. Reads the strategy's `channels` list to determine the current channel.
+2. Looks up `messages[$channel]` to find the notification class.
+3. Instantiates the class with the `Delivery` record.
+4. Calls `getSubscription()` to retrieve the recipient's contact for that channel (from their `subscriptions` relationship).
+5. Dispatches the notification via Laravel's notification system.
+
+If a channel identifier is not present in `messages`, step 2 returns nothing and the delivery is skipped without an error.
+
+## Related pages
+
+<Columns cols={2}>
+  <Card title="Delivery strategies" icon="sitemap" href="/configuration/strategies">
+    Configure which channels each notification type uses and in what order.
+  </Card>
+  <Card title="Deliverability" icon="clock" href="/configuration/deliverability">
+    Control retry intervals, time windows, and channel escalation timing.
+  </Card>
+</Columns>

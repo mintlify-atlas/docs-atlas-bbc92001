@@ -1,97 +1,82 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Notification Center for Laravel Nova"
+description: "Multi-channel notification delivery with automatic channel escalation, smart retries, audience segmentation, and open/action tracking — so no message goes unnoticed."
 ---
 
-## Setting up
-
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="box" href="/installation">
+    Install via Composer and register the Nova tool in minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Publish your first notification and see deliveries in action.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Core Concepts" icon="book" href="/concepts/notifications">
+    Understand notifications, channels, strategies, and audiences.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="code" href="/api/models/notification">
+    Explore models, notification classes, jobs, and Nova actions.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What is Notification Center?
 
-Everything you need to create world-class documentation.
+Notification Center is a Laravel Nova package that gives your application a production-ready multi-channel notification system. Define delivery strategies once — the package handles scheduling, channel escalation, retries, and tracking automatically.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={3}>
+  <Card title="9 channels" icon="tower-broadcast">
+    Nova, Card, Email, SMS, Call, WhatsApp, Web Push, Slack, and Microsoft Teams.
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="5 strategies" icon="diagram-project">
+    Marketing, Transactional, System, Alert, and Reminder — each fully configurable.
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="3 audience types" icon="users">
+    Static, Dynamic, and Segment-based audiences for precise targeting.
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+</CardGroup>
 
-## Need inspiration?
+## Key features
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<AccordionGroup>
+  <Accordion title="Automatic channel escalation">
+    Configure an ordered list of channels per strategy. If a channel times out, the package automatically escalates to the next channel in the list — ensuring delivery even when one channel fails.
+  </Accordion>
+  <Accordion title="Smart retries with escalating delays">
+    Define `retry_interval` as an array of seconds (e.g., `[30, 300, 900]`) to implement progressive backoff. Each retry attempt uses the next interval in the sequence.
+  </Accordion>
+  <Accordion title="Audience segmentation">
+    Target specific users with **Static** audiences (manually curated), **Dynamic** audiences (criteria-based resolution at query time), or **Segments** (reusable cohorts based on profile attributes).
+  </Accordion>
+  <Accordion title="Open and action tracking">
+    Every delivery gets unique open and action slugs. Tracking routes are registered automatically. Optionally integrate with Google Analytics GA4 by setting your `GOOGLE_ANALYTICS_ID`.
+  </Accordion>
+  <Accordion title="Delivery scheduling">
+    Control exactly when notifications reach users — configure allowed days of the week and a time window (hours) per strategy. The scheduler re-dispatches strategies hourly.
+  </Accordion>
+  <Accordion title="Nova dashboard">
+    Manage notifications, templates, audiences, profiles, deliveries, and events directly inside Laravel Nova. No separate admin interface needed.
+  </Accordion>
+</AccordionGroup>
+
+## Supported channels
+
+| Channel | Identifier | Provider |
+|---------|-----------|---------|
+| Nova bell | `nova` | Laravel Nova native |
+| Card | `card` | Notifications Dashboard |
+| Email | `email` | Laravel Mail |
+| SMS | `sms` | Twilio |
+| Voice call | `call` | Twilio |
+| WhatsApp | `whatsapp` | Twilio Content Templates |
+| Web Push | `webpush` | Service Workers (HTTPS required) |
+| Slack | `slack` | Laravel Slack channel |
+| Microsoft Teams | `teams` | laravel-notification-channels/microsoft-teams |
+
+## Requirements
+
+- PHP 8.2+
+- Laravel Nova 5.4+
+- Laravel application served over HTTPS (required for Web Push)
+
+<Note>
+  Notification Center is available on [Packagist](https://packagist.org/packages/opscale-co/notification-center). Install it with `composer require opscale-co/notification-center`.
+</Note>

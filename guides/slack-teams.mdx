@@ -1,0 +1,199 @@
+---
+title: "Slack and Microsoft Teams"
+description: "Send notifications to Slack channels and Microsoft Teams using the slack and teams channels."
+---
+
+The `slack` and `teams` channels are ideal for **system** and **alert** notifications that need to surface in team communication tools rather than to individual end-users. Both channels post messages to configured webhooks.
+
+## When to use Slack/Teams vs. user-facing channels
+
+<CardGroup cols={2}>
+  <Card title="Slack / Teams" icon="bell-slash">
+    Best for internal team alerts, system health notifications, and ops-level messages. Target a shared Slack channel or Teams channel where the whole team is notified.
+  </Card>
+  <Card title="nova / card / webpush" icon="bell">
+    Best for end-user notifications inside your product. Each user receives their own targeted message.
+  </Card>
+</CardGroup>
+
+## Slack
+
+### Installation
+
+The `slack` channel uses Laravel's first-party [laravel/slack-notification-channel](https://github.com/laravel/slack-notification-channel) package:
+
+```bash
+composer require laravel/slack-notification-channel
+```
+
+### Configuring the webhook URL
+
+Add your Slack incoming webhook URL to your notifiable model by implementing `routeNotificationForSlack()`:
+
+```php
+public function routeNotificationForSlack(): string
+{
+    return env('SLACK_WEBHOOK_URL');
+}
+```
+
+Or store it directly on the user/profile model and return it from the route method.
+
+### The SlackNotification class
+
+```php
+// src/Notifications/SlackNotification.php
+public function via(object $notifiable): array
+{
+    return [SlackChannel::class];
+}
+
+public function toSlack(object $notifiable): SlackMessage
+{
+    $model = $this->delivery->notification;
+
+    $message = (new SlackMessage)
+        ->text($model->subject)
+        ->headerBlock($model->subject)
+        ->sectionBlock(function (SectionBlock $block) use ($model) {
+            $block->text($model->summary ?? $model->subject);
+        });
+
+    $url = route('notification-center.track.open', $this->delivery->open_slug);
+
+    $message->actionsBlock(function (ActionsBlock $block) use ($url) {
+        $block->button(__('View'))->url($url);
+    });
+
+    return $message;
+}
+```
+
+The Slack message uses [Block Kit](https://api.slack.com/block-kit):
+
+- A **header block** with the notification subject.
+- A **section block** showing the summary (falls back to subject if summary is empty).
+- An **actions block** with a **View** button linking to the tracking URL.
+
+### Registering the slack channel
+
+```php
+// config/notification-center.php
+'messages' => [
+    'slack' => \Opscale\NotificationCenter\Notifications\SlackNotification::class,
+    // ...
+],
+```
+
+Then add `slack` to a strategy:
+
+```php
+'system' => [
+    'channels' => ['slack'],
+    // ...
+],
+```
+
+---
+
+## Microsoft Teams
+
+### Installation
+
+The `teams` channel uses the [laravel-notification-channels/microsoft-teams](https://github.com/laravel-notification-channels/microsoft-teams) package:
+
+```bash
+composer require laravel-notification-channels/microsoft-teams
+```
+
+### Configuring the webhook URL
+
+Implement `routeNotificationForMicrosoftTeams()` on your notifiable model:
+
+```php
+public function routeNotificationForMicrosoftTeams(): string
+{
+    return env('TEAMS_WEBHOOK_URL');
+}
+```
+
+### The TeamsNotification class
+
+```php
+// src/Notifications/TeamsNotification.php
+public function via(object $notifiable): array
+{
+    return [MicrosoftTeamsChannel::class];
+}
+
+public function toMicrosoftTeams(object $notifiable): MicrosoftTeamsAdaptiveCard
+{
+    $model = $this->delivery->notification;
+
+    $card = MicrosoftTeamsAdaptiveCard::create()
+        ->title($model->subject)
+        ->content([
+            TextBlock::create()
+                ->setText($model->summary ?? $model->subject)
+                ->setIsSubtle(true),
+        ]);
+
+    $url = route('notification-center.track.open', $this->delivery->open_slug);
+
+    $card->actions([
+        ActionOpenUrl::create()
+            ->setTitle(__('View'))
+            ->setUrl($url),
+    ]);
+
+    return $card;
+}
+```
+
+The Teams message uses an [Adaptive Card](https://adaptivecards.io):
+
+- A **title** set to the notification subject.
+- A **TextBlock** with the summary (falls back to subject).
+- An **ActionOpenUrl** button linking to the tracking URL.
+
+### Registering the teams channel
+
+```php
+// config/notification-center.php
+'messages' => [
+    'teams' => \Opscale\NotificationCenter\Notifications\TeamsNotification::class,
+    // ...
+],
+```
+
+Then add `teams` to a strategy:
+
+```php
+'alert' => [
+    'channels' => ['teams'],
+    // ...
+],
+```
+
+---
+
+## Comparing Slack and Teams
+
+<Tabs>
+  <Tab title="Slack">
+    - Package: `laravel/slack-notification-channel`
+    - Message format: Block Kit (header + section + actions)
+    - Routing method: `routeNotificationForSlack()`
+    - Channel identifier: `slack`
+  </Tab>
+  <Tab title="Microsoft Teams">
+    - Package: `laravel-notification-channels/microsoft-teams`
+    - Message format: Adaptive Card (title + TextBlock + ActionOpenUrl)
+    - Routing method: `routeNotificationForMicrosoftTeams()`
+    - Channel identifier: `teams`
+  </Tab>
+</Tabs>
+
+<Info>
+  Both channels include a **View** button that routes through the package's tracking URL (`notification-center.track.open`), so opens are recorded even for Slack and Teams messages.
+</Info>

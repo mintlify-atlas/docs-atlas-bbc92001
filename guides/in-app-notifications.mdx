@@ -1,0 +1,176 @@
+---
+title: "In-app notifications"
+description: "Deliver notifications inside your Laravel Nova application using Nova bell, Card, and Web Push channels."
+---
+
+The package ships three channels that deliver notifications directly inside your application without requiring an external messaging service:
+
+| Channel identifier | Delivery target |
+|---|---|
+| `nova` | Laravel Nova's native notification bell |
+| `card` | Notifications Dashboard (Nova card grid) |
+| `webpush` | Browser push via service workers |
+
+## Nova channel
+
+The `nova` channel uses Laravel Nova's built-in `NovaChannel` and `NovaNotification` classes. Notifications appear in the **bell icon** in the Nova header bar, with real-time alerts inside the admin panel.
+
+```php
+// src/Notifications/NovaNotification.php
+public function via(object $notifiable): array
+{
+    return [NovaChannel::class];
+}
+
+public function toNova(object $notifiable): NovaMessage
+{
+    $model = $this->delivery->notification;
+    $type  = $model->type->value;
+
+    $message = NovaMessage::make()
+        ->message($model->subject)
+        ->icon($this->getIcon($type))
+        ->type($this->getNovaType($type));
+
+    $url = route('notification-center.track.open', $this->delivery->open_slug);
+    $message->action(__('View'), URL::remote($url))->openInNewTab();
+
+    return $message;
+}
+```
+
+The icon and severity type are derived from the notification **Type**:
+
+| Notification type | Nova icon | Nova type |
+|---|---|---|
+| Alert | `exclamation-circle` | `error` |
+| System | `cog` | `warning` |
+| Reminder | `clock` | `info` |
+| Marketing | `megaphone` | `info` |
+| Transactional | `bell` | `info` |
+
+To use the `nova` channel, map it in your config:
+
+```php
+// config/notification-center.php
+'messages' => [
+    'nova' => \Opscale\NotificationCenter\Notifications\NovaNotification::class,
+    // ...
+],
+```
+
+And include it in a strategy:
+
+```php
+'transactional' => [
+    'channels' => ['nova'],
+    // ...
+],
+```
+
+## Card channel
+
+The `card` channel renders notifications as visual cards on the **Notifications Dashboard** — a dedicated Nova dashboard where users browse and manage their in-app notifications.
+
+```php
+// src/Notifications/CardNotification.php
+public function toCard(object $notifiable): NotificationCard
+{
+    $model = $this->delivery->notification;
+
+    $card = NotificationCard::make()
+        ->title($model->subject)
+        ->subtitle($model->summary)
+        ->variant($this->getVariant($model->type->value));
+
+    $card->actionLabel(__('View'))
+        ->actionUrl(route('notification-center.track.open', $this->delivery->open_slug))
+        ->actionTarget('_blank');
+
+    return $card;
+}
+```
+
+Card variants are mapped from notification type:
+
+| Notification type | Card variant |
+|---|---|
+| Alert | `danger` |
+| System | `warning` |
+| All others | `primary` |
+
+Each `NotificationCard` renders at 1/3 width and exposes a configurable action button:
+
+```php
+// src/Nova/Cards/NotificationCard.php
+public $width = '1/3';
+
+// Fluent builder methods:
+->title(string $title)
+->subtitle(string $subtitle)
+->actionLabel(string $label)
+->actionUrl(string $url)
+->actionTarget(string $target)  // '_self' or '_blank'
+->variant(string $variant)       // 'primary', 'warning', 'danger'
+```
+
+## Setting up the Notifications Dashboard
+
+The `NotificationsDashboard` is a Nova dashboard that displays card notifications for the currently authenticated user. Register it in your `NovaServiceProvider`:
+
+```php
+// app/Providers/NovaServiceProvider.php
+use Opscale\NotificationCenter\Nova\Dashboards\NotificationsDashboard;
+
+public function dashboards()
+{
+    return [
+        new NotificationsDashboard,
+    ];
+}
+```
+
+The dashboard resolves the current user's profile, then loads all deliveries with a `SENT` or `RECEIVED` status:
+
+```php
+// src/Nova/Dashboards/NotificationsDashboard.php
+$deliveries = Delivery::with('notification')
+    ->where('profile_id', $profile->id)
+    ->whereIn('status', [
+        DeliveryStatus::SENT->value,
+        DeliveryStatus::RECEIVED->value,
+    ])
+    ->latest()
+    ->get();
+
+foreach ($deliveries as $delivery) {
+    $cards[] = (new CardNotification($delivery))->toCard($delivery->profile);
+}
+```
+
+### Web Push subscription prompt
+
+If the current user has no active push subscriptions, the dashboard automatically prepends a **warning** card prompting them to subscribe:
+
+```php
+// src/Nova/Dashboards/NotificationsDashboard.php
+if ($profile->pushSubscriptions()->doesntExist()) {
+    $cards[] = NotificationCard::make()
+        ->title(__('Enable Push Notifications'))
+        ->subtitle(__('Stay updated with real-time alerts and messages by enabling push notifications.'))
+        ->variant('warning')
+        ->actionLabel(__('Subscribe'))
+        ->actionUrl(route('notification-center.webpush.subscribe', $profile->id))
+        ->actionTarget('_blank');
+}
+```
+
+<Note>
+  The Notifications Dashboard only displays cards for the **authenticated user**. Each user sees only their own notifications.
+</Note>
+
+## Web Push channel
+
+The `webpush` channel delivers browser push notifications via service workers. Because service workers require a secure context, **your application must be served over HTTPS** in any environment where web push is enabled.
+
+See the [Web Push guide](/guides/web-push) for full setup instructions, VAPID key configuration, and service worker details.

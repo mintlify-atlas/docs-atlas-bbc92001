@@ -1,0 +1,193 @@
+---
+title: "Deliverability"
+description: "Fine-tune time windows, retry schedules, and channel escalation for reliable delivery."
+---
+
+Deliverability configuration controls *when* notifications are allowed to be sent, *how often* failed deliveries are retried, and *when* the system escalates to the next channel. All of these settings live inside the per-strategy blocks in `config/notification-center.php`.
+
+## Time windows
+
+Every strategy can restrict delivery to specific days of the week and hours of the day. The system only dispatches and times deliveries while inside the configured window.
+
+### Days
+
+The `days` field accepts an array of integers representing days of the week:
+
+| Value | Day |
+|---|---|
+| `0` | Sunday |
+| `1` | Monday |
+| `2` | Tuesday |
+| `3` | Wednesday |
+| `4` | Thursday |
+| `5` | Friday |
+| `6` | Saturday |
+
+```php
+// Weekdays only
+'days' => [1, 2, 3, 4, 5],
+
+// Every day
+'days' => [0, 1, 2, 3, 4, 5, 6],
+```
+
+### Hours
+
+The `hours` field takes a two-element array of `HH:MM` strings in 24-hour format defining the delivery window for each allowed day:
+
+```php
+// Business hours
+'hours' => ['09:00', '18:00'],
+
+// Around the clock
+'hours' => ['00:00', '23:59'],
+```
+
+<Warning>
+Delivery jobs may be dispatched by the hourly scheduler at any clock time, but the `timeout_per_channel` timer only accumulates minutes that fall inside the configured `days` and `hours` window. A delivery created on a Friday evening will not accumulate weekend minutes toward its timeout.
+</Warning>
+
+## Retry interval escalation
+
+The `retry_interval` field controls how long the system waits between delivery attempts on the same channel. Providing multiple values creates an escalating backoff schedule.
+
+```php
+// Fixed interval: always retry after 30 minutes
+'retry_interval' => [1800],
+
+// Escalating: 30 s → 5 min → 15 min
+'retry_interval' => [30, 300, 900],
+```
+
+The values map directly to Laravel's job `$backoff` property on the underlying notification class. The first failed attempt waits `retry_interval[0]` seconds, the second waits `retry_interval[1]` seconds, and so on. If there are more retry attempts than values in the array, the last value is reused.
+
+## Max attempts per channel
+
+The `max_attempts` field sets the maximum number of times the system will try to deliver a notification on a single channel before giving up on that channel:
+
+```php
+// Try once
+'max_attempts' => 1,
+
+// Try up to three times
+'max_attempts' => 3,
+```
+
+This maps to Laravel's `$tries` on the queued notification job. Once the limit is reached, the delivery is marked as failed on that channel. The system then waits for `timeout_per_channel` business hours before escalating to the next channel.
+
+<Tip>
+Set `max_attempts` to `1` for channels like `email` where repeated delivery of the same message creates a poor user experience.
+</Tip>
+
+## Channel timeout and escalation flow
+
+Channel escalation is driven by `timeout_per_channel` — the number of **business hours** (within the `days` and `hours` window) that must elapse before the system tries the next channel.
+
+The `ExecuteNotificationStrategy` job runs hourly via the Laravel scheduler and evaluates every published, non-expired notification. For each recipient profile, it:
+
+1. Checks whether the latest delivery has reached a terminal state (`Opened` or `Verified`). If so, no further action is taken.
+2. Looks up the current channel's position in the `channels` list and identifies the next channel.
+3. Calculates how many business hours have elapsed since the last delivery was created, counting only time within the `days` and `hours` window.
+4. If elapsed time is less than `timeout_per_channel`, it waits. If elapsed time meets or exceeds the threshold, it creates a new delivery for the next channel.
+
+```php
+// After 1 business hour on webpush, escalate to whatsapp
+// After another business hour on whatsapp, escalate to card
+'channels'            => ['webpush', 'whatsapp', 'card'],
+'timeout_per_channel' => 1,
+```
+
+## How the scheduler works
+
+The package registers an hourly scheduled task in `ToolServiceProvider`. Every hour it queries all notifications with:
+
+- `status = Published`
+- No expiration, **or** expiration date in the future
+
+For each matching notification, it dispatches an `ExecuteNotificationStrategy` job onto the strategy's configured queue.
+
+```php
+// From ToolServiceProvider
+$this->app->make(Schedule::class)->call(function () {
+    NotificationModel::where('status', NotificationStatus::PUBLISHED)
+        ->whereNull('expiration')->orWhere('expiration', '>', now())
+        ->each(function ($notification) {
+            ExecuteNotificationStrategy::dispatch($notification);
+        });
+})->hourly();
+```
+
+<Note>
+You must run the Laravel scheduler for delivery to work. Add `* * * * * php /path-to-your-project/artisan schedule:run >> /dev/null 2>&1` to your server's crontab.
+</Note>
+
+## Queue configuration per strategy
+
+Each strategy's `queue` field determines which Laravel queue worker processes its jobs. You can use this to apply different worker counts, timeouts, or priorities:
+
+```php
+'marketing'     => ['queue' => 'notifications-marketing', ...],
+'transactional' => ['queue' => 'notifications-transactional', ...],
+'system'        => ['queue' => 'notifications-system', ...],
+'alert'         => ['queue' => 'notifications-alert', ...],
+'reminder'      => ['queue' => 'notifications-reminder', ...],
+```
+
+Start dedicated workers for each queue, or group lower-priority types together:
+
+```bash
+# High priority: alerts get their own worker
+php artisan queue:work --queue=notifications-alert
+
+# Lower priority: marketing and reminders share a worker
+php artisan queue:work --queue=notifications-marketing,notifications-reminder
+```
+
+## Practical examples
+
+### Aggressive retry for alerts
+
+For urgent notifications, use short retry intervals, a tight channel timeout, and 24/7 delivery:
+
+```php
+'alert' => [
+    'queue'               => 'notifications-alert',
+    'channels'            => ['webpush', 'whatsapp', 'card'],
+    'retry_interval'      => [30, 300, 900],
+    'max_attempts'        => 3,
+    'timeout_per_channel' => 1,
+    'days'                => [0, 1, 2, 3, 4, 5, 6],
+    'hours'               => ['00:00', '23:59'],
+],
+```
+
+This gives a recipient up to 3 attempts on web push (at 30 s, 5 min, 15 min backoff), then after 1 business hour escalates to WhatsApp, and after another hour escalates to an in-app card.
+
+### Conservative retry for marketing
+
+For promotional messages, send once per day and restrict to weekday business hours to avoid spamming recipients:
+
+```php
+'marketing' => [
+    'queue'               => 'notifications-marketing',
+    'channels'            => ['email'],
+    'retry_interval'      => [3600],
+    'max_attempts'        => 1,
+    'timeout_per_channel' => 24,
+    'days'                => [1, 2, 3, 4, 5],
+    'hours'               => ['09:00', '18:00'],
+],
+```
+
+With `max_attempts` set to `1`, the email is attempted once. There are no retries. The 24-hour timeout means the system will not escalate to another channel for a full business day — and since there is only one channel, no escalation will occur at all.
+
+## Related pages
+
+<Columns cols={2}>
+  <Card title="Delivery strategies" icon="sitemap" href="/configuration/strategies">
+    Full reference for every strategy field and all five built-in strategies.
+  </Card>
+  <Card title="Channel configuration" icon="envelope" href="/configuration/channels">
+    Register notification classes for each delivery channel.
+  </Card>
+</Columns>

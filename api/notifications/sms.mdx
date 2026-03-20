@@ -1,0 +1,82 @@
+---
+title: "SmsNotification"
+description: "Sends SMS messages via Twilio."
+---
+
+**Class:** `Opscale\NotificationCenter\Notifications\SmsNotification`  
+**Channel identifier:** `sms`  
+**Underlying driver:** `NotificationChannels\Twilio\TwilioChannel`
+
+`SmsNotification` sends a plain-text SMS to the subscriber's phone number using the [laravel-notification-channels/twilio](https://github.com/laravel-notification-channels/twilio) package.
+
+## Requirements
+
+<Warning>
+This channel requires the `laravel-notification-channels/twilio` Composer package and valid Twilio credentials (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`) set in your environment.
+</Warning>
+
+## Method signatures
+
+```php
+class SmsNotification extends Notification
+{
+    public function via(object $notifiable): array
+
+    public function toTwilio(object $notifiable): TwilioSmsMessage
+}
+```
+
+### `via()`
+
+Returns `[TwilioChannel::class]`, routing the notification through the Twilio notification channel.
+
+### `toTwilio(object $notifiable): TwilioSmsMessage`
+
+Builds and returns a `NotificationChannels\Twilio\TwilioSmsMessage`. The SMS body is composed as:
+
+```
+{notification->summary}
+
+{tracked open URL}
+```
+
+| Field | Source |
+|---|---|
+| Content | `$delivery->notification->summary` followed by a newline and the tracked open URL |
+| Tracked URL | Open tracking route for `$delivery->open_slug` |
+
+## What data it sends
+
+The outbound SMS contains:
+
+- The notification's `summary` text
+- A blank line separator
+- The full tracking URL for the delivery's `open_slug`
+
+## Usage example
+
+Add `sms` to a strategy's `channels` array:
+
+```php
+// config/notification-center.php
+'strategies' => [
+    'alert' => [
+        'queue'    => 'notifications-alert',
+        'channels' => ['sms', 'webpush'],
+        // ...
+    ],
+],
+```
+
+The notifiable model must implement `routeNotificationForTwilio()` returning the recipient's phone number in E.164 format (e.g. `+15551234567`):
+
+```php
+public function routeNotificationForTwilio(): string
+{
+    return $this->phone_number;
+}
+```
+
+<Note>
+The subscriber's contact value stored in the subscription record should be the phone number in E.164 format.
+</Note>

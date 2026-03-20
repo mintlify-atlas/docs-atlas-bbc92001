@@ -1,0 +1,98 @@
+---
+title: "NovaNotification"
+description: "Delivers notifications through Laravel Nova's native notification bell."
+---
+
+**Class:** `Opscale\NotificationCenter\Notifications\NovaNotification`  
+**Channel identifier:** `nova`  
+**Underlying driver:** `Laravel\Nova\Notifications\NovaChannel`
+
+`NovaNotification` sends a notification to the authenticated Nova user's bell icon using Laravel Nova's built-in notification system. It overrides the standard channel resolution so that deliveries addressed to the channel key `nova` are dispatched via `NovaChannel`.
+
+## Method signatures
+
+```php
+class NovaNotification extends Notification
+{
+    public function via(object $notifiable): array
+
+    public function toNova(object $notifiable): NovaMessage
+
+    public function getSubscription(): mixed
+
+    protected function getIcon(string $type): string
+
+    protected function getNovaType(string $type): string
+}
+```
+
+### `via()`
+
+Returns `[NovaChannel::class]` so Laravel routes the notification through Nova's notification driver.
+
+### `toNova(object $notifiable): NovaMessage`
+
+Builds and returns the `Laravel\Nova\Notifications\NovaMessage` sent to the Nova bell. The payload is constructed as follows:
+
+| Field | Source |
+|---|---|
+| Message text | `$delivery->notification->subject` |
+| Icon | Resolved from `$delivery->notification->type->value` via `getIcon()` |
+| Type badge | Resolved from `$delivery->notification->type->value` via `getNovaType()` |
+| Action URL | Tracking open route for `$delivery->open_slug`, opened in a new tab |
+
+### `getSubscription(): mixed`
+
+Overrides the base class to return the notifiable model instance (not just a contact value). It looks up the contact via the profile's subscription list, then calls `find()` on the notifiable's Eloquent model.
+
+### `getIcon(string $type): string`
+
+Maps the notification type to a Heroicon identifier:
+
+| Type value | Icon |
+|---|---|
+| `Alert` | `exclamation-circle` |
+| `System` | `cog` |
+| `Reminder` | `clock` |
+| `Marketing` | `megaphone` |
+| _(default)_ | `bell` |
+
+### `getNovaType(string $type): string`
+
+Maps the notification type to a Nova message type badge:
+
+| Type value | Nova type |
+|---|---|
+| `Alert` | `error` |
+| `System` | `warning` |
+| _(default)_ | `info` |
+
+## What data it sends
+
+The `NovaMessage` object delivered to Nova contains:
+
+- A message string equal to the notification's `subject`
+- A Heroicon name
+- A type badge (`info`, `warning`, or `error`)
+- A "View" action button linking to the tracked open URL (opens in a new browser tab)
+
+## Usage example
+
+The `nova` channel is the default channel for the `transactional` strategy. Assign it via the strategy config, or reference it directly on a notification:
+
+```php
+// config/notification-center.php
+'strategies' => [
+    'transactional' => [
+        'queue'    => 'notifications-transactional',
+        'channels' => ['nova'],
+        // ...
+    ],
+],
+```
+
+When a delivery is dispatched for this strategy, `NovaNotification` is instantiated with the `Delivery` model and queued on `notifications-transactional`.
+
+<Info>
+The notifiable resolved by `getSubscription()` must be the Nova user model (or implement `Notifiable`). The subscription's contact field should store the user's primary key so `find()` can locate the correct record.
+</Info>

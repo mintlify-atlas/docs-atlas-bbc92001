@@ -1,0 +1,90 @@
+---
+title: "Installation"
+description: "Install Notification Center via Composer and register it with Laravel Nova."
+---
+
+<Steps>
+  <Step title="Require the package">
+    Install the package into your Laravel application using Composer:
+
+    ```bash
+    composer require opscale-co/notification-center
+    ```
+  </Step>
+
+  <Step title="Register the tool with Nova">
+    Open `app/Providers/NovaServiceProvider.php` and add the tool to the `tools` method:
+
+    ```php
+    // in app/Providers/NovaServiceProvider.php
+    // ...
+    public function tools()
+    {
+        return [
+            // ...
+            new \Opscale\NotificationCenter\Tool(),
+        ];
+    }
+    ```
+
+    This registers all Nova resources (Notification, Template, Audience, Profile, Delivery, Subscription, Event) and adds the "Notification Center" section to the Nova sidebar.
+  </Step>
+
+  <Step title="Run the install command">
+    Publish the configuration file and run the package migrations:
+
+    ```bash
+    php artisan notification-center:install
+    ```
+
+    This command:
+    - Publishes `config/notification-center.php` to your application's config directory
+    - Runs the following migrations:
+      - `create_profiles_table`
+      - `create_subscriptions_table`
+      - `create_audiences_table`
+      - `create_audience_profile_table`
+      - `create_notifications_table`
+      - `create_audience_notification_table`
+      - `create_deliveries_table`
+      - `create_events_table`
+  </Step>
+
+  <Step title="Set environment variables">
+    Add the following variables to your `.env` file as needed:
+
+    ```bash
+    # Required for WhatsApp channel — your Twilio Content Template SID
+    TWILIO_WHATSAPP_CONTENT_SID=HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+    # Optional — your GA4 Measurement ID for Google Analytics tracking
+    GOOGLE_ANALYTICS_ID=G-XXXXXXXXXX
+    ```
+
+    These map to the following keys in `config/notification-center.php`:
+
+    ```php
+    'whatsapp_content_sid' => env('TWILIO_WHATSAPP_CONTENT_SID'),
+    'google_analytics_id' => env('GOOGLE_ANALYTICS_ID'),
+    ```
+
+    <Note>
+      `TWILIO_WHATSAPP_CONTENT_SID` is only required if you use the `whatsapp` channel. You can omit it if your delivery strategies do not include WhatsApp.
+    </Note>
+  </Step>
+</Steps>
+
+## What gets registered
+
+Once installed, the `ToolServiceProvider` automatically:
+
+- Registers all Nova resources under the **Notification Center** sidebar section
+- Listens for `NotificationSent` and `NotificationFailed` events to record delivery tracking data
+- Schedules an hourly job that dispatches delivery strategies for all published, non-expired notifications
+- Registers tracking routes for open and action slugs
+
+## Web Push requirement
+
+<Warning>
+  The Web Push channel (`webpush`) requires your application to be served over **HTTPS**. Service workers — which power browser push notifications — only operate in secure contexts. Ensure HTTPS is configured in every environment where web push is enabled.
+</Warning>

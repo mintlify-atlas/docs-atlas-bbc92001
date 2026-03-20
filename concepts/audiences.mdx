@@ -1,0 +1,101 @@
+---
+title: "Audiences"
+description: "Target the right users with Static, Dynamic, and Segment-based audiences."
+---
+
+An **Audience** is a named group of [Profiles](/concepts/audiences#profiles) that a notification is delivered to. Before a notification can be published, at least one audience must be attached to it. The `ExecuteNotificationStrategy` job iterates every audience on the notification, resolves its members into profiles, and creates delivery records for each one.
+
+## Audience Types
+
+The `AudienceType` enum defines three ways to compose an audience:
+
+<CardGroup cols={3}>
+  <Card title="Static" icon="list-check">
+    A manually curated list of profiles. Members are stored in the `notification_center_audience_profile` pivot table and do not change unless explicitly edited.
+
+    Best for one-off sends to a known, fixed set of recipients.
+  </Card>
+  <Card title="Dynamic" icon="filter">
+    Membership is resolved at query time using `criteria` rules stored on the audience record. The audience evaluates which profiles match the criteria every time it is resolved.
+
+    Best for recurring notifications where the recipient set evolves over time.
+  </Card>
+  <Card title="Segment" icon="tags">
+    Named reusable cohorts built from profile attributes and [Spatie Tags](https://github.com/spatie/laravel-tags). Define a segment once and attach it to multiple notifications.
+
+    Best for persona-based or attribute-driven targeting (e.g., "premium users", "US region").
+  </Card>
+</CardGroup>
+
+## Audience Model Fields
+
+```php
+// Opscale\NotificationCenter\Models\Audience
+
+$fillable = [
+    'name',           // Human-readable label shown in Nova
+    'description',    // Optional description of the audience's purpose
+    'type',           // AudienceType enum: Static | Dynamic | Segment
+    'criteria',       // JSON rules used by Dynamic audiences for membership resolution
+    'total_members',  // Cached count of resolved members
+];
+```
+
+## Profiles
+
+A **Profile** is the notification-specific representation of a notifiable entity. Profiles act as the bridge between your application's user models and the notification delivery system.
+
+Key characteristics of the `Profile` model:
+
+- Uses a **polymorphic `notifiable` relationship** (`notifiable_type` / `notifiable_id`), so any Eloquent model in your application (e.g., `User`, `Admin`) can be a profile owner.
+- Implements Laravel's `Notifiable` trait, making it a first-class notification recipient.
+- Supports **Web Push** via the `HasPushSubscriptions` trait (from `laravel-notification-channels/webpush`).
+- Supports **Spatie Tags** via the `HasTags` trait, enabling segment membership.
+- Stores channel-specific contact details through a `subscriptions` relationship.
+
+```php
+// Opscale\NotificationCenter\Models\Profile
+
+$fillable = [
+    'notifiable_type',  // e.g., App\Models\User
+    'notifiable_id',    // Primary key of the notifiable entity
+];
+
+// Always eager-loaded
+$with = ['notifiable', 'subscriptions'];
+```
+
+## Relationships
+
+```
+Audience
+  ├── belongs-to-many  Notification  (via notification_center_audience_notification)
+  └── belongs-to-many  Profile       (via notification_center_audience_profile)
+
+Profile
+  ├── morph-to         notifiable    (your User / Admin model)
+  ├── belongs-to-many  Audience      (via notification_center_audience_profile)
+  ├── has-many         Subscription
+  └── has-many         Delivery
+```
+
+## Attaching Audiences to a Notification
+
+<Steps>
+  <Step title="Create or select an audience">
+    Navigate to **Audiences** in the Nova sidebar. Create a new audience, choose its type, and configure members or criteria.
+  </Step>
+  <Step title="Open the notification">
+    Go to **Notifications** in the Nova sidebar and open the draft notification you want to publish.
+  </Step>
+  <Step title="Attach audiences">
+    Use the **Audiences** relationship panel on the notification detail page to attach one or more audiences.
+  </Step>
+  <Step title="Publish">
+    Trigger the **Publish** action. The strategy job will resolve all attached audiences and create deliveries for every matching profile.
+  </Step>
+</Steps>
+
+<Tip>
+  A notification can have multiple audiences attached. All profiles across all attached audiences receive a delivery — duplicates within the same audience are handled by the delivery creation logic.
+</Tip>

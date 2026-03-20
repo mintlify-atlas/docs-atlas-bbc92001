@@ -1,0 +1,157 @@
+---
+title: "Notification model"
+description: "Eloquent model representing a notification record with type, template, audiences, and delivery lifecycle."
+---
+
+## Class
+
+`Opscale\NotificationCenter\Models\Notification`
+
+Extends `Illuminate\Database\Eloquent\Model`. Uses `HasUlids`, `SoftDeletes`, `UsesTemplate`, and `ValidatorTrait`.
+
+**Database table:** `notification_center_notifications`
+
+## Attributes
+
+<ResponseField name="id" type="string" required>
+  ULID primary key, auto-generated on creation.
+</ResponseField>
+
+<ResponseField name="template_id" type="string | null">
+  Foreign key referencing a dynamic resources template. Set to `null` when the template is deleted. Cast from `dynamic_resources_templates`.
+</ResponseField>
+
+<ResponseField name="subject" type="string" required>
+  Short subject line for the notification. Maximum 50 characters.
+</ResponseField>
+
+<ResponseField name="body" type="string" required>
+  Full message body content. Stored as `longText`.
+</ResponseField>
+
+<ResponseField name="summary" type="string" required>
+  Brief summary or preview text. Maximum 100 characters.
+</ResponseField>
+
+<ResponseField name="expiration" type="Carbon\Carbon | null">
+  Optional datetime after which the notification is considered expired. Cast to `datetime`.
+</ResponseField>
+
+<ResponseField name="action" type="string | null">
+  Optional URL or action target associated with the notification. Maximum 255 characters.
+</ResponseField>
+
+<ResponseField name="status" type="NotificationStatus">
+  Publication status of the notification. Cast to the `NotificationStatus` enum. Defaults to `Draft`.
+</ResponseField>
+
+<ResponseField name="type" type="NotificationType">
+  Category of the notification. Cast to the `NotificationType` enum. Defaults to `Transactional`.
+</ResponseField>
+
+<ResponseField name="data" type="array | null">
+  Arbitrary JSON payload for dynamic template variables or extra metadata. Cast to `array`.
+</ResponseField>
+
+<ResponseField name="created_at" type="Carbon\Carbon | null">
+  Timestamp of when the record was created.
+</ResponseField>
+
+<ResponseField name="updated_at" type="Carbon\Carbon | null">
+  Timestamp of the last update.
+</ResponseField>
+
+<ResponseField name="deleted_at" type="Carbon\Carbon | null">
+  Soft-delete timestamp. Present when the record has been soft-deleted.
+</ResponseField>
+
+## Enums
+
+### NotificationType
+
+`Opscale\NotificationCenter\Models\Enums\NotificationType`
+
+| Value | String | Description |
+|-------|--------|-------------|
+| `MARKETING` | `'Marketing'` | Promotional content, newsletters, and marketing campaigns. |
+| `TRANSACTIONAL` | `'Transactional'` | Order confirmations, receipts, and account-related updates. |
+| `SYSTEM` | `'System'` | Platform updates, maintenance notices, and system messages. |
+| `ALERT` | `'Alert'` | Urgent notifications requiring immediate attention. |
+| `REMINDER` | `'Reminder'` | Scheduled reminders for tasks, events, or deadlines. |
+
+### NotificationStatus
+
+`Opscale\NotificationCenter\Models\Enums\NotificationStatus`
+
+| Value | String | Description |
+|-------|--------|-------------|
+| `DRAFT` | `'Draft'` | The notification is not yet published and will not be dispatched. |
+| `PUBLISHED` | `'Published'` | The notification is active and eligible for delivery. |
+
+## Relationships
+
+### audiences
+
+Returns `BelongsToMany` — the `Audience` models attached to this notification via the `notification_center_audience_notification` pivot table.
+
+```php
+$notification->audiences; // Illuminate\Database\Eloquent\Collection<Audience>
+```
+
+### deliveries
+
+Returns `HasMany` — all `Delivery` records created when this notification was dispatched.
+
+```php
+$notification->deliveries; // Illuminate\Database\Eloquent\Collection<Delivery>
+```
+
+### template _(via UsesTemplate)_
+
+Returns the associated dynamic resource template, if one has been assigned. Provided by the `UsesTemplate` concern from `opscale/nova-dynamic-resources`.
+
+## Usage examples
+
+### Creating a notification
+
+```php
+use Opscale\NotificationCenter\Models\Notification;
+use Opscale\NotificationCenter\Models\Enums\NotificationStatus;
+use Opscale\NotificationCenter\Models\Enums\NotificationType;
+
+$notification = Notification::create([
+    'subject'    => 'Your order has shipped',
+    'body'       => 'Great news! Your order #1234 is on its way.',
+    'summary'    => 'Order #1234 shipped',
+    'type'       => NotificationType::TRANSACTIONAL,
+    'status'     => NotificationStatus::DRAFT,
+    'action'     => 'https://example.com/orders/1234',
+    'expiration' => now()->addDays(7),
+    'data'       => ['order_id' => 1234],
+]);
+```
+
+### Publishing and attaching audiences
+
+```php
+$notification->update(['status' => NotificationStatus::PUBLISHED]);
+
+$audience = Audience::find($audienceId);
+$notification->audiences()->attach($audience);
+```
+
+### Querying by type and status
+
+```php
+$alerts = Notification::where('type', NotificationType::ALERT)
+    ->where('status', NotificationStatus::PUBLISHED)
+    ->get();
+```
+
+<Note>
+  `Notification` uses ULID primary keys. Do not expect integer auto-increment IDs when querying or seeding.
+</Note>
+
+<Warning>
+  Soft deletes are enabled. Records removed from the Nova UI are not permanently deleted. Use `withTrashed()` or `onlyTrashed()` scopes when querying deleted notifications.
+</Warning>

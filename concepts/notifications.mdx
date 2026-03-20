@@ -1,0 +1,126 @@
+---
+title: "Notifications"
+description: "Understand the Notification model — types, statuses, templates, and lifecycle."
+---
+
+A **Notification** is the core unit of communication in Notification Center. It represents a message intended for delivery to one or more [audiences](/concepts/audiences), across one or more [channels](/concepts/channels), according to a [delivery strategy](/concepts/strategies).
+
+Each notification holds the message content (subject, body, summary, action), references an optional [template](/concepts/templates), carries a type that determines which strategy is used, and tracks a status reflecting where it is in its lifecycle.
+
+## Notification Types
+
+The `NotificationType` enum defines five categories. The type you assign to a notification determines which delivery strategy — and therefore which channels, queue, schedule, and retry policy — will be used.
+
+<AccordionGroup>
+  <Accordion title="Marketing">
+    Promotional content, newsletters, and marketing campaigns.
+
+    Uses the `marketing` strategy: email-only, weekdays 09:00–18:00, single attempt.
+  </Accordion>
+
+  <Accordion title="Transactional">
+    Order confirmations, receipts, and account-related updates.
+
+    Uses the `transactional` strategy: nova channel, 24/7, up to 3 attempts.
+  </Accordion>
+
+  <Accordion title="System">
+    Platform updates, maintenance notices, and system messages.
+
+    Uses the `system` strategy: webpush then email escalation, weekdays 08:00–20:00.
+  </Accordion>
+
+  <Accordion title="Alert">
+    Urgent notifications requiring immediate attention.
+
+    Uses the `alert` strategy: webpush → whatsapp → card escalation, 24/7, fast retry intervals (30 s, 5 min, 15 min).
+  </Accordion>
+
+  <Accordion title="Reminder">
+    Scheduled reminders for tasks, events, or deadlines.
+
+    Uses the `reminder` strategy: webpush then whatsapp escalation, weekdays 09:00–19:00.
+  </Accordion>
+</AccordionGroup>
+
+## Notification Statuses
+
+A notification moves through two statuses defined by the `NotificationStatus` enum:
+
+| Status | Description |
+|--------|-------------|
+| `Draft` | The notification has been created but not yet published. Content can still be edited. |
+| `Published` | The notification has been published. The delivery strategy job is dispatched and deliveries begin. |
+
+<Note>
+  Once a notification is published its type and audiences are locked in — the strategy job reads them immediately on dispatch.
+</Note>
+
+## Delivery Statuses
+
+Each individual **Delivery** record (one per profile per channel attempt) tracks its own status:
+
+| Status | Description |
+|--------|-------------|
+| `Pending` | Queued and waiting to be sent. |
+| `Sent` | Dispatched to the channel provider. |
+| `Received` | Confirmed received by the recipient. |
+| `Opened` | Opened or viewed by the recipient. |
+| `Verified` | Read or explicitly acknowledged. |
+| `Failed` | Could not be delivered. |
+| `Expired` | Timed out before being verified. |
+
+Transitions between statuses are strictly controlled. For example, `Pending` can only move to `Sent`, `Failed`, or `Expired`; a `Verified` delivery is terminal.
+
+## Relationships
+
+The `Notification` model sits at the centre of the data model:
+
+```
+Notification
+  ├── belongs-to-many  Audience   (via notification_center_audience_notification)
+  └── has-many         Delivery
+                         ├── belongs-to  Profile
+                         └── has-many    Event
+```
+
+- **Audiences** define *who* receives the notification.
+- **Deliveries** are the per-profile, per-channel dispatch records.
+- **Events** are the tracking records attached to each delivery (opens, actions).
+
+## Model Fields
+
+```php
+// Opscale\NotificationCenter\Models\Notification
+
+$fillable = [
+    'subject',      // Notification subject line
+    'body',         // Full message body
+    'summary',      // Short summary or preview text
+    'expiration',   // datetime — deliveries after this point are marked Expired
+    'action',       // CTA URL or action identifier
+    'status',       // NotificationStatus enum
+    'type',         // NotificationType enum
+    'template_id',  // Optional template reference
+    'data',         // Arbitrary JSON payload
+];
+```
+
+## Publishing a Notification
+
+Publishing a notification from the Nova dashboard triggers the **Publish Notification** action, which:
+
+<Steps>
+  <Step title="Validates the notification">
+    Ensures audiences are attached and required fields are present.
+  </Step>
+  <Step title="Sets status to Published">
+    Updates the `status` field to `NotificationStatus::PUBLISHED`.
+  </Step>
+  <Step title="Dispatches the strategy job">
+    Queues an `ExecuteNotificationStrategy` job onto the queue configured for the notification's type.
+  </Step>
+  <Step title="Deliveries are created and sent">
+    The job iterates all audience profiles, creates `Delivery` records, and dispatches the appropriate channel notification class.
+  </Step>
+</Steps>

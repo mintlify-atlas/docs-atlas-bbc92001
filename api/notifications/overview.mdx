@@ -1,0 +1,97 @@
+---
+title: "Notifications overview"
+description: "Overview of all notification classes and how they map to delivery channels."
+---
+
+The Notification Center ships nine concrete notification classes, each responsible for formatting and dispatching a `Delivery` record to a specific external channel. All of them extend the abstract `Opscale\NotificationCenter\Notifications\Notification` base class, which handles queuing, retry logic, and subscription resolution.
+
+## Base `Notification` class
+
+`Opscale\NotificationCenter\Notifications\Notification` extends Laravel's `Illuminate\Notifications\Notification` and implements `ShouldQueue`. It sets up queue configuration automatically from the `notification-center.strategies` config key that matches the notification's type.
+
+```php
+abstract class Notification extends BaseNotification implements ShouldQueue
+{
+    use Queueable, SerializesModels;
+
+    public function __construct(Delivery $delivery)
+
+    public function via(object $notifiable): array
+
+    public function getSubscription(): mixed
+
+    public function getDelivery(): Delivery
+}
+```
+
+| Method | Description |
+|---|---|
+| `__construct(Delivery $delivery)` | Accepts a `Delivery` model and reads queue, `tries`, and `backoff` from the matching strategy config. |
+| `via(object $notifiable): array` | Returns `[$this->delivery->channel]`. Subclasses override this to return the concrete channel driver class. |
+| `getSubscription(): mixed` | Resolves the subscriber's contact value from the profile's subscription list for the channel. |
+| `getDelivery(): Delivery` | Returns the underlying `Delivery` model. |
+
+### Queue and retry configuration
+
+The constructor reads its queue settings from `config('notification-center.strategies.<type>')`, where `<type>` is the lowercase value of the notification's `type` field (e.g. `transactional`, `alert`).
+
+| Strategy key | Applied to |
+|---|---|
+| `queue` | Queue name (`onQueue()`) |
+| `max_attempts` | `$this->tries` |
+| `retry_interval` | `$this->backoff` (array, supports escalating delays) |
+
+## Registering notification classes
+
+Each channel identifier maps to a notification class in `config/notification-center.php` under the `messages` key:
+
+```php
+// config/notification-center.php
+'messages' => [
+    'nova'     => \Opscale\NotificationCenter\Notifications\NovaNotification::class,
+    'card'     => \Opscale\NotificationCenter\Notifications\CardNotification::class,
+    'email'    => \Opscale\NotificationCenter\Notifications\EmailNotification::class,
+    'sms'      => \Opscale\NotificationCenter\Notifications\SmsNotification::class,
+    'call'     => \Opscale\NotificationCenter\Notifications\CallNotification::class,
+    'whatsapp' => \Opscale\NotificationCenter\Notifications\WhatsAppNotification::class,
+    'webpush'  => \Opscale\NotificationCenter\Notifications\WebPushNotification::class,
+    'slack'    => \Opscale\NotificationCenter\Notifications\SlackNotification::class,
+    'teams'    => \Opscale\NotificationCenter\Notifications\TeamsNotification::class,
+],
+```
+
+To replace a built-in class with a custom implementation, swap the class reference for your own:
+
+```php
+'messages' => [
+    'email' => App\Notifications\CustomEmailNotification::class,
+    // ...
+],
+```
+
+Your custom class must extend `Opscale\NotificationCenter\Notifications\Notification` and accept a `Delivery` model in its constructor.
+
+## Notification class reference
+
+| Channel key | Class | Underlying driver | Provider |
+|---|---|---|---|
+| `nova` | `NovaNotification` | `Laravel\Nova\Notifications\NovaChannel` | Laravel Nova |
+| `card` | `CardNotification` | `card` (custom) | Notification Center |
+| `email` | `EmailNotification` | `Illuminate\Notifications\Channels\MailChannel` | Laravel Mail |
+| `sms` | `SmsNotification` | `NotificationChannels\Twilio\TwilioChannel` | Twilio |
+| `call` | `CallNotification` | `NotificationChannels\Twilio\TwilioChannel` | Twilio |
+| `whatsapp` | `WhatsAppNotification` | `NotificationChannels\Twilio\TwilioChannel` | Twilio |
+| `webpush` | `WebPushNotification` | `NotificationChannels\WebPush\WebPushChannel` | Web Push (VAPID) |
+| `slack` | `SlackNotification` | `Illuminate\Notifications\Slack\SlackChannel` | Slack |
+| `teams` | `TeamsNotification` | `NotificationChannels\MicrosoftTeams\MicrosoftTeamsChannel` | Microsoft Teams |
+
+## Customizing notification rendering
+
+Each notification class reads content from the `Delivery` model's associated `Notification` record (`$this->delivery->notification`). The fields used are:
+
+- `subject` — the notification title or subject line
+- `summary` — a short plain-text summary
+- `body` — full body content (used as a fallback when `summary` is absent)
+- `type` — determines icon, colour variant, and Nova message type
+
+To change how a notification is rendered for a specific channel, publish the config and replace the class reference under `messages`, then implement the corresponding `to*` method in your custom class.

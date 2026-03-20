@@ -1,0 +1,188 @@
+---
+title: "ExecuteNotificationStrategy"
+description: "Job that orchestrates the delivery strategy for a published notification."
+---
+
+## Overview
+
+`Opscale\NotificationCenter\Jobs\ExecuteNotificationStrategy` is the central orchestration job for multi-channel notification delivery. When dispatched, it iterates over every audience attached to a notification, resolves the profiles in that audience, and — per profile — either dispatches the first-channel delivery or escalates to the next channel in the configured strategy.
+
+```php
+use Opscale\NotificationCenter\Jobs\ExecuteNotificationStrategy;
+
+ExecuteNotificationStrategy::dispatch($notification);
+```
+
+---
+
+## Class signature
+
+```php
+class ExecuteNotificationStrategy implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public function __construct(
+        protected Notification $notification,
+    );
+
+    public function handle(): void;
+}
+```
+
+---
+
+## Constructor
+
+<ParamField path="notification" type="Opscale\NotificationCenter\Models\Notification" required>
+  The `Notification` model whose delivery strategy should be executed. The job reads the notification's `type` to look up the correct strategy block in `config('notification-center.strategies')` and places itself on the appropriate queue.
+</ParamField>
+
+**Queue assignment** is resolved automatically from the strategy config:
+
+```php
+$type  = strtolower($this->notification->type->value);
+$queue = config("notification-center.strategies.{$type}.queue", 'notifications');
+$this->onQueue($queue);
+```
+
+---
+
+## How it works
+
+<Steps>
+  <Step title="Load strategy config">
+    `handle()` reads the full strategy array for the notification type:
+
+    ```php
+    $this->strategy  = config("notification-center.strategies.{$type}");
+    $this->channels  = $this->strategy['channels'] ?? [];
+    $this->timeoutHours = $this->strategy['timeout_per_channel'] ?? 24;
+    $this->messages  = config('notification-center.messages', []);
+    ```
+
+    If `channels` is empty the job returns immediately without creating any deliveries.
+  </Step>
+
+  <Step title="Iterate audiences and profiles">
+    The job loops over every `Audience` relationship on the notification. For each audience it calls `getProfiles()` and eager-loads only the deliveries belonging to this notification, ordered by creation time:
+
+    ```php
+    foreach ($this->notification->audiences as $audience) {
+        $profiles = $audience->getProfiles()->load([
+            'deliveries' => fn ($q) => $q
+                ->where('notification_id', $this->notification->id)
+                ->orderBy('created_at'),
+        ]);
+
+        foreach ($profiles as $profile) {
+            $this->processProfile($profile);
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Process each profile">
+    `processProfile()` decides what to do for a single profile:
+
+    - **No prior deliveries** — creates a `Delivery` record with status `PENDING` on the first channel and calls `sendDelivery()`.
+    - **Latest delivery is `OPENED` or `VERIFIED`** — skips the profile; no further action needed.
+    - **Latest delivery is any other status** — calls `resolveNextChannel()` to determine whether enough time has elapsed to escalate.
+  </Step>
+
+  <Step title="Resolve channel escalation">
+    `resolveNextChannel()` returns the next channel string, or `null` if escalation should not happen yet:
+
+    ```php
+    protected function resolveNextChannel(Delivery $latestDelivery): ?string
+    ```
+
+    Escalation is blocked when:
+    - The current channel is not found in the strategy's `channels` array.
+    - There is no next channel (the current channel is already last).
+    - The elapsed *available* hours since the latest delivery was created is less than `timeout_per_channel`.
+  </Step>
+
+  <Step title="Calculate available hours">
+    `calculateAvailability()` counts only the hours that fall within the strategy's allowed `days` and `hours` window:
+
+    ```php
+    protected function calculateAvailability(Carbon $from, Carbon $to): float
+    ```
+
+    This ensures that weekend blackouts or night-time restrictions do not count toward the escalation timeout.
+  </Step>
+
+  <Step title="Dispatch the delivery">
+    `sendDelivery()` looks up the notification class for the channel from `config('notification-center.messages')`, instantiates it, resolves the recipient subscription, and calls `notify()`:
+
+    ```php
+    protected function sendDelivery(Delivery $delivery): void
+    ```
+
+    If no message class is registered for the channel, or if no subscription is found, the method returns silently.
+  </Step>
+</Steps>
+
+---
+
+## Strategy configuration reference
+
+The job reads its settings from the `notification-center.strategies.<type>` config block. All keys are optional and fall back to defaults shown below.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `queue` | `string` | `'notifications'` | Laravel queue name for this strategy |
+| `channels` | `string[]` | `[]` | Ordered list of channels to attempt |
+| `timeout_per_channel` | `int` | `24` | Hours of *available* time before escalating to the next channel |
+| `days` | `int[]` | `[0,1,2,3,4,5,6]` | Allowed days of the week (0 = Sunday) |
+| `hours` | `string[2]` | `['00:00','23:59']` | Allowed time window in 24 h format `[from, to]` |
+| `max_attempts` | `int` | — | Maximum delivery attempts per channel (used by `SendDelivery`) |
+| `retry_interval` | `int[]` | — | Seconds between retries (escalating array supported) |
+
+**Example — alert strategy (multi-channel escalation):**
+
+```php
+'alert' => [
+    'queue'               => 'notifications-alert',
+    'channels'            => ['webpush', 'whatsapp', 'card'],
+    'retry_interval'      => [30, 300, 900],
+    'max_attempts'        => 3,
+    'timeout_per_channel' => 1,   // escalate after 1 available hour
+    'days'                => [0, 1, 2, 3, 4, 5, 6],
+    'hours'               => ['00:00', '23:59'],
+],
+```
+
+---
+
+## Scheduler
+
+The job is invoked by the hourly scheduler for every published, non-expired notification. This means channel escalation is checked at most once per hour per notification — the `timeout_per_channel` value should be set in whole-hour increments for predictable behavior.
+
+<Info>
+  The scheduler only dispatches `ExecuteNotificationStrategy` for notifications whose status is `Published`. Drafts and notifications past their expiry date are skipped.
+</Info>
+
+---
+
+## Queue configuration
+
+Each strategy maps to a dedicated queue. The built-in strategies use the following queues:
+
+| Strategy | Queue |
+|---|---|
+| `marketing` | `notifications-marketing` |
+| `transactional` | `notifications-transactional` |
+| `system` | `notifications-system` |
+| `alert` | `notifications-alert` |
+| `reminder` | `notifications-reminder` |
+
+<Tip>
+  Run a dedicated worker per queue to ensure `alert` deliveries are never blocked by a backlog of `marketing` emails.
+
+  ```bash
+  php artisan queue:work --queue=notifications-alert
+  php artisan queue:work --queue=notifications-marketing
+  ```
+</Tip>

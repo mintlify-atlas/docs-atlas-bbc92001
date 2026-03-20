@@ -1,0 +1,215 @@
+---
+title: "Delivery strategies"
+description: "Configure delivery strategies for each notification type with channel ordering, retries, and timeouts."
+---
+
+Each notification type — `marketing`, `transactional`, `system`, `alert`, and `reminder` — has its own strategy block under the `strategies` key. A strategy tells the system which queue to use, which channels to attempt, how aggressively to retry, and within what time windows delivery is allowed.
+
+## Strategy fields
+
+<ParamField path="queue" type="string" required>
+  The Laravel queue name on which delivery jobs for this notification type are dispatched. Use separate queues to apply different worker priorities or scaling rules per type.
+
+  Example: `notifications-alert`
+</ParamField>
+
+<ParamField path="channels" type="string[]" required>
+  Ordered list of channel identifiers to attempt for delivery. The first channel is tried first; subsequent channels are only attempted after the previous channel times out. Each identifier must correspond to a key registered in the `messages` config.
+
+  Example: `['webpush', 'whatsapp', 'card']`
+</ParamField>
+
+<ParamField path="retry_interval" type="integer[]" required>
+  Number of seconds to wait between retry attempts on the same channel. Provide multiple values to use escalating delays — the first retry waits `retry_interval[0]` seconds, the second waits `retry_interval[1]` seconds, and so on. The last value is reused for any additional retries beyond the array length.
+
+  Example: `[30, 300, 900]` — 30 s, then 5 min, then 15 min
+</ParamField>
+
+<ParamField path="max_attempts" type="integer" required>
+  Maximum number of delivery attempts per channel. Once this limit is reached on a channel, the system moves to the next channel in the list (after `timeout_per_channel` hours have elapsed). Maps directly to Laravel's `$tries` on the underlying notification job.
+
+  Example: `3`
+</ParamField>
+
+<ParamField path="timeout_per_channel" type="integer" required>
+  Number of **business hours** (within the configured `days` and `hours` window) that must elapse before the system escalates from one channel to the next. The timer only counts time during allowed delivery windows, not calendar wall-clock hours.
+
+  Example: `1` (escalate after 1 hour of delivery-window time)
+</ParamField>
+
+<ParamField path="days" type="integer[]" required>
+  Days of the week on which this strategy is allowed to send. Values are integers where `0` = Sunday and `6` = Saturday.
+
+  Example: `[1, 2, 3, 4, 5]` — Monday through Friday only
+</ParamField>
+
+<ParamField path="hours" type="string[]" required>
+  A two-element array defining the `[from, to]` delivery time window in 24-hour `HH:MM` format. Notifications are only dispatched and timed within this window.
+
+  Example: `['09:00', '18:00']`
+</ParamField>
+
+## How channel escalation works
+
+When a notification is dispatched, `ExecuteNotificationStrategy` evaluates each audience profile and determines whether to create a new delivery or escalate to the next channel.
+
+<Steps>
+  <Step title="First attempt">
+    A `Delivery` record is created for the first channel in `channels`. The underlying notification job is dispatched to the strategy's queue.
+  </Step>
+  <Step title="Retry on the same channel">
+    If delivery fails, the notification job retries according to `retry_interval` and `max_attempts`. The backoff array is applied directly to Laravel's job retry mechanism.
+  </Step>
+  <Step title="Timeout check">
+    On each hourly scheduler run, the system recalculates how many business hours (within `days` and `hours`) have passed since the latest delivery attempt. If the elapsed time meets or exceeds `timeout_per_channel`, escalation is triggered.
+  </Step>
+  <Step title="Channel escalation">
+    A new `Delivery` record is created for the next channel in the `channels` list, and the process repeats from step 1.
+  </Step>
+  <Step title="Terminal states">
+    Escalation stops when a delivery reaches `Opened` or `Verified` status, when all channels have been exhausted, or when the notification expires.
+  </Step>
+</Steps>
+
+<Info>
+The scheduler dispatches `ExecuteNotificationStrategy` once per hour for every `Published` notification that has not yet expired. Elapsed time is measured only within the configured delivery window — weekends and off-hours do not count toward `timeout_per_channel`.
+</Info>
+
+## All five strategies
+
+The following block shows the complete default `strategies` config:
+
+```php config/notification-center.php
+'strategies' => [
+    'marketing' => [
+        'queue'               => 'notifications-marketing',
+        'channels'            => ['email'],
+        'retry_interval'      => [3600],
+        'max_attempts'        => 1,
+        'timeout_per_channel' => 24,
+        'days'                => [1, 2, 3, 4, 5],
+        'hours'               => ['09:00', '18:00'],
+    ],
+    'transactional' => [
+        'queue'               => 'notifications-transactional',
+        'channels'            => ['nova'],
+        'retry_interval'      => [300, 1800],
+        'max_attempts'        => 3,
+        'timeout_per_channel' => 2,
+        'days'                => [0, 1, 2, 3, 4, 5, 6],
+        'hours'               => ['00:00', '23:59'],
+    ],
+    'system' => [
+        'queue'               => 'notifications-system',
+        'channels'            => ['webpush', 'email'],
+        'retry_interval'      => [1800, 3600],
+        'max_attempts'        => 2,
+        'timeout_per_channel' => 12,
+        'days'                => [1, 2, 3, 4, 5],
+        'hours'               => ['08:00', '20:00'],
+    ],
+    'alert' => [
+        'queue'               => 'notifications-alert',
+        'channels'            => ['webpush', 'whatsapp', 'card'],
+        'retry_interval'      => [30, 300, 900],
+        'max_attempts'        => 3,
+        'timeout_per_channel' => 1,
+        'days'                => [0, 1, 2, 3, 4, 5, 6],
+        'hours'               => ['00:00', '23:59'],
+    ],
+    'reminder' => [
+        'queue'               => 'notifications-reminder',
+        'channels'            => ['webpush', 'whatsapp'],
+        'retry_interval'      => [1800],
+        'max_attempts'        => 2,
+        'timeout_per_channel' => 6,
+        'days'                => [1, 2, 3, 4, 5],
+        'hours'               => ['09:00', '19:00'],
+    ],
+],
+```
+
+## Strategy reference
+
+<AccordionGroup>
+  <Accordion title="marketing">
+    Promotional content, newsletters, and campaigns. Restricted to business hours on weekdays, with a single email attempt and a 24-hour channel timeout.
+
+    | Field | Value |
+    |---|---|
+    | `queue` | `notifications-marketing` |
+    | `channels` | `email` |
+    | `retry_interval` | `[3600]` (1 hour) |
+    | `max_attempts` | `1` |
+    | `timeout_per_channel` | `24` hours |
+    | `days` | Mon–Fri |
+    | `hours` | 09:00–18:00 |
+  </Accordion>
+
+  <Accordion title="transactional">
+    Order confirmations, receipts, and account updates. Runs 24/7 with fast retries (5 min, then 30 min) and up to 3 attempts.
+
+    | Field | Value |
+    |---|---|
+    | `queue` | `notifications-transactional` |
+    | `channels` | `nova` |
+    | `retry_interval` | `[300, 1800]` (5 min, 30 min) |
+    | `max_attempts` | `3` |
+    | `timeout_per_channel` | `2` hours |
+    | `days` | Every day |
+    | `hours` | 00:00–23:59 |
+  </Accordion>
+
+  <Accordion title="system">
+    Platform updates and maintenance notices. Delivers via web push first, falling back to email after 12 hours. Weekdays only.
+
+    | Field | Value |
+    |---|---|
+    | `queue` | `notifications-system` |
+    | `channels` | `webpush`, `email` |
+    | `retry_interval` | `[1800, 3600]` (30 min, 1 hour) |
+    | `max_attempts` | `2` |
+    | `timeout_per_channel` | `12` hours |
+    | `days` | Mon–Fri |
+    | `hours` | 08:00–20:00 |
+  </Accordion>
+
+  <Accordion title="alert">
+    Urgent notifications requiring immediate attention. Runs 24/7 with rapid escalation across three channels (web push → WhatsApp → card). Aggressive short retry intervals.
+
+    | Field | Value |
+    |---|---|
+    | `queue` | `notifications-alert` |
+    | `channels` | `webpush`, `whatsapp`, `card` |
+    | `retry_interval` | `[30, 300, 900]` (30 s, 5 min, 15 min) |
+    | `max_attempts` | `3` |
+    | `timeout_per_channel` | `1` hour |
+    | `days` | Every day |
+    | `hours` | 00:00–23:59 |
+  </Accordion>
+
+  <Accordion title="reminder">
+    Scheduled reminders for tasks, events, or deadlines. Delivers via web push with a WhatsApp fallback. Weekdays only during business hours.
+
+    | Field | Value |
+    |---|---|
+    | `queue` | `notifications-reminder` |
+    | `channels` | `webpush`, `whatsapp` |
+    | `retry_interval` | `[1800]` (30 min) |
+    | `max_attempts` | `2` |
+    | `timeout_per_channel` | `6` hours |
+    | `days` | Mon–Fri |
+    | `hours` | 09:00–19:00 |
+  </Accordion>
+</AccordionGroup>
+
+## Related pages
+
+<Columns cols={2}>
+  <Card title="Deliverability" icon="clock" href="/configuration/deliverability">
+    Detailed guide on time windows, retry escalation, and the hourly scheduler.
+  </Card>
+  <Card title="Channel configuration" icon="envelope" href="/configuration/channels">
+    Register and configure the notification classes used in each channel.
+  </Card>
+</Columns>

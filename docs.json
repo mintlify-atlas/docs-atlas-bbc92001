@@ -1,122 +1,117 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Notification Center for Laravel Nova",
+  "theme": "linden",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#7c7c7c",
+    "light": "#060606",
+    "dark": "#cccccc"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "https://media.brand.dev/fd0c0879-7adb-45ad-a29e-2808f07d7c7d.jpg",
+  "logo": {
+    "light": "https://media.brand.dev/4996adf3-c75b-4db8-b0c1-6d4863cb36bd.svg",
+    "dark": "https://media.brand.dev/4996adf3-c75b-4db8-b0c1-6d4863cb36bd.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/opscale-co/notification-center"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/opscale-co/notification-center"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
+            "pages": ["introduction", "installation", "quickstart"]
+          },
+          {
+            "group": "Core Concepts",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "concepts/notifications",
+              "concepts/channels",
+              "concepts/strategies",
+              "concepts/audiences",
+              "concepts/templates",
+              "concepts/tracking"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Guides",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "guides/publishing-notifications",
+              "guides/segmentation",
+              "guides/in-app-notifications",
+              "guides/web-push",
+              "guides/whatsapp",
+              "guides/slack-teams"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Configuration",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
-            ]
-          },
-          {
-            "group": "AI tools",
-            "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "configuration/overview",
+              "configuration/strategies",
+              "configuration/deliverability",
+              "configuration/channels"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Models",
             "pages": [
-              "api-reference/introduction"
+              "api/models/notification",
+              "api/models/delivery",
+              "api/models/audience",
+              "api/models/profile",
+              "api/models/subscription"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Notifications",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/notifications/overview",
+              "api/notifications/nova",
+              "api/notifications/card",
+              "api/notifications/email",
+              "api/notifications/sms",
+              "api/notifications/webpush",
+              "api/notifications/whatsapp",
+              "api/notifications/slack",
+              "api/notifications/teams"
+            ]
+          },
+          {
+            "group": "Jobs & Actions",
+            "pages": [
+              "api/jobs/execute-strategy",
+              "api/jobs/send-delivery",
+              "api/actions/publish-notification",
+              "api/actions/force-delivery"
             ]
           }
         ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
+      },
       {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
+        "tab": "Changelog",
+        "groups": [
+          {
+            "group": "Releases",
+            "pages": ["changelog"]
+          }
+        ]
       }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

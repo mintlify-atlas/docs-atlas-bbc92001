@@ -1,0 +1,166 @@
+---
+title: "Profile model"
+description: "Eloquent model representing a notifiable user with channel-specific contact information."
+---
+
+## Class
+
+`Opscale\NotificationCenter\Models\Profile`
+
+Extends `Illuminate\Database\Eloquent\Model`. Uses `HasPushSubscriptions`, `HasTags`, `HasUlids`, `Notifiable`, `SoftDeletes`, and `ValidatorTrait`.
+
+**Database table:** `notification_center_profiles`
+
+## Overview
+
+A `Profile` is the Notification Center's internal representation of a notifiable user. Rather than sending notifications directly to your application's `User` model, the package dispatches them through `Profile` records. Each `Profile` is linked to your application's notifiable model (e.g. `User`) via a polymorphic `notifiable` relationship.
+
+Because `Profile` uses Laravel's `Notifiable` trait, it can be passed directly to `Notification::send()` or used as the target in any standard Laravel notification dispatch.
+
+## Attributes
+
+<ResponseField name="id" type="string" required>
+  ULID primary key, auto-generated on creation.
+</ResponseField>
+
+<ResponseField name="notifiable_type" type="string" required>
+  The fully-qualified class name of the polymorphic notifiable model (e.g. `App\Models\User`). Part of the `ulidMorphs` pair.
+</ResponseField>
+
+<ResponseField name="notifiable_id" type="string" required>
+  The ULID of the linked notifiable model instance. Part of the `ulidMorphs` pair.
+</ResponseField>
+
+<ResponseField name="created_at" type="Carbon\Carbon | null">
+  Timestamp of when the profile was created.
+</ResponseField>
+
+<ResponseField name="updated_at" type="Carbon\Carbon | null">
+  Timestamp of the last update.
+</ResponseField>
+
+<ResponseField name="deleted_at" type="Carbon\Carbon | null">
+  Soft-delete timestamp. Present when the profile has been soft-deleted.
+</ResponseField>
+
+<Info>
+  Channel-specific contact details (email address, phone number, push endpoint, etc.) are stored on `Subscription` records associated with the profile, not on the `Profile` itself.
+</Info>
+
+## Eager-loaded relationships
+
+The `$with` property is set to `['notifiable', 'subscriptions']`, so these two relationships are always loaded with every `Profile` query.
+
+## Relationships
+
+### notifiable
+
+Returns `MorphTo` — the underlying application model (e.g. a `User`) that this profile represents.
+
+```php
+$profile->notifiable; // App\Models\User (or any other notifiable model)
+
+// Access user attributes through the relationship
+echo $profile->notifiable->email;
+```
+
+### subscriptions
+
+Returns `HasMany` — the `Subscription` records associated with this profile. Each subscription represents a verified contact point for a specific channel.
+
+```php
+$profile->subscriptions; // Illuminate\Database\Eloquent\Collection<Subscription>
+```
+
+### deliveries
+
+Returns `HasMany` — all `Delivery` records for notifications sent to this profile.
+
+```php
+$profile->deliveries; // Illuminate\Database\Eloquent\Collection<Delivery>
+```
+
+### audiences
+
+Returns `BelongsToMany` — the `Audience` groups this profile belongs to, via the `notification_center_audience_profile` pivot table.
+
+```php
+$profile->audiences; // Illuminate\Database\Eloquent\Collection<Audience>
+```
+
+## Key methods
+
+### `routeNotificationFor($driver, $notification = null)`
+
+Overrides the default Laravel routing logic. When the notification implements `getSubscription()`, that value is returned directly (used for webpush channel routing). Otherwise, it delegates to the parent `Notifiable` implementation.
+
+<ParamField path="driver" type="string" required>
+  The notification channel driver name (e.g. `'mail'`, `'webpush'`).
+</ParamField>
+
+<ParamField path="notification" type="mixed" default="null">
+  The notification instance being dispatched. If it exposes a `getSubscription()` method, that subscription is used as the routing target.
+</ParamField>
+
+```php
+// Internally called by Laravel's notification dispatcher
+$routingTarget = $profile->routeNotificationFor('webpush', $notification);
+```
+
+## Tags (via spatie/laravel-tags)
+
+`Profile` includes the `HasTags` trait from `spatie/laravel-tags`. Tags are used by **Segment** audiences to dynamically select profiles.
+
+```php
+// Attach tags to a profile
+$profile->attachTag('vip');
+$profile->attachTags(['beta-tester', 'early-adopter']);
+
+// Find profiles with any of the given tags
+$profiles = Profile::withAnyTags(['vip', 'beta-tester'])->get();
+```
+
+## Usage examples
+
+### Creating a profile for a user
+
+```php
+use Opscale\NotificationCenter\Models\Profile;
+
+$user = App\Models\User::find($userId);
+
+$profile = Profile::create([
+    'notifiable_type' => get_class($user),
+    'notifiable_id'   => $user->id,
+]);
+```
+
+### Dispatching a notification to a profile
+
+```php
+use Illuminate\Support\Facades\Notification;
+
+// Profile implements Notifiable, so it can receive notifications directly
+Notification::send($profile, new OrderShippedNotification($order));
+```
+
+### Looking up a profile from a user
+
+```php
+$profile = Profile::where('notifiable_type', App\Models\User::class)
+    ->where('notifiable_id', $user->id)
+    ->firstOrFail();
+
+// Access all delivery history for this user
+foreach ($profile->deliveries as $delivery) {
+    echo $delivery->channel . ': ' . $delivery->status->value;
+}
+```
+
+<Note>
+  Because `notifiable` and `subscriptions` are always eager-loaded, querying large sets of profiles without additional constraints may result in significant memory usage. Apply `without('notifiable', 'subscriptions')` if you need a lightweight query.
+</Note>
+
+<Warning>
+  Soft deletes are enabled. Deleting a profile in Nova soft-deletes the record; associated `Subscription` records are preserved until the profile is force-deleted.
+</Warning>

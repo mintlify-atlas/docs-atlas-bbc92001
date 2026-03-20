@@ -1,0 +1,159 @@
+---
+title: "PublishNotification action"
+description: "Nova action that publishes a notification and triggers the delivery strategy."
+---
+
+## Overview
+
+`Opscale\NotificationCenter\Nova\Actions\PublishNotification` is a Laravel Nova action available on the **Notification** resource detail view. It transitions a notification from `Draft` to `Published`, attaches a selected audience, and immediately dispatches `ExecuteNotificationStrategy` to begin channel delivery.
+
+```php
+use Opscale\NotificationCenter\Nova\Actions\PublishNotification;
+```
+
+---
+
+## Class signature
+
+```php
+class PublishNotification extends Action
+{
+    use InteractsWithQueue, Queueable;
+
+    public bool $onlyOnDetail = true;
+
+    public function name(): string;
+
+    public function handle(ActionFields $fields, Collection $models): mixed;
+
+    public function fields(NovaRequest $request): array;
+}
+```
+
+---
+
+## Availability
+
+| Property | Value |
+|---|---|
+| `$onlyOnDetail` | `true` — the action is only shown on the Notification detail page, not on index views |
+| Resource | Notification |
+
+---
+
+## Action fields
+
+<ParamField path="audience_id" type="select" required>
+  The ID of the `Audience` to attach to the notification. The select options are populated from all audiences in the database (`Audience::pluck('name', 'id')`).
+
+  Validation rules: `required`.
+
+  Helper text: *"Select the audience to send the notification to."*
+</ParamField>
+
+---
+
+## What happens when the action runs
+
+<Steps>
+  <Step title="Validate the audience">
+    The action retrieves the audience by the submitted `audience_id`. If the audience does not exist, it returns an error banner:
+
+    ```php
+    return Action::danger(__('Invalid audience selected.'));
+    ```
+  </Step>
+
+  <Step title="Publish the notification">
+    Each selected notification model is updated to `Published` status:
+
+    ```php
+    $notification->update([
+        'status' => NotificationStatus::PUBLISHED,
+    ]);
+    ```
+  </Step>
+
+  <Step title="Attach the audience">
+    The chosen audience is associated with the notification via the pivot relationship:
+
+    ```php
+    $notification->audiences()->attach($audience->id);
+    ```
+  </Step>
+
+  <Step title="Dispatch the strategy job">
+    `ExecuteNotificationStrategy` is dispatched for the notification. The job will iterate over all profiles in the attached audience and begin the configured channel delivery sequence:
+
+    ```php
+    ExecuteNotificationStrategy::dispatch($notification);
+    ```
+  </Step>
+
+  <Step title="Confirm success">
+    A success message is returned to the Nova UI:
+
+    ```php
+    return Action::message(__('Notification(s) published successfully!'));
+    ```
+  </Step>
+</Steps>
+
+---
+
+## `handle` method signature
+
+```php
+public function handle(ActionFields $fields, Collection $models): mixed
+```
+
+<ParamField path="fields" type="ActionFields" required>
+  The submitted form fields. Provides `audience_id` via `$fields->get('audience_id')`.
+</ParamField>
+
+<ParamField path="models" type="Illuminate\Support\Collection" required>
+  The collection of `Notification` models selected in the Nova UI. Each model is published and dispatched individually.
+</ParamField>
+
+---
+
+## Status transitions
+
+| Before | After |
+|---|---|
+| `Draft` | `Published` |
+
+```php
+enum NotificationStatus: string
+{
+    case DRAFT     = 'Draft';
+    case PUBLISHED = 'Published';
+}
+```
+
+<Warning>
+  Publishing a notification is not reversible through the UI. Once published, the `ExecuteNotificationStrategy` job is already queued and will begin creating `Delivery` records. If you need to stop delivery, remove the notification's audiences or use a queue management tool to discard pending jobs.
+</Warning>
+
+---
+
+## Usage in Nova
+
+Register the action on your Notification Nova resource:
+
+```php
+use Opscale\NotificationCenter\Nova\Actions\PublishNotification;
+
+public function actions(NovaRequest $request): array
+{
+    return [
+        new PublishNotification(),
+    ];
+}
+```
+
+The action will appear in the **Actions** dropdown on the notification detail page. The operator selects an audience from the dropdown and clicks **Publish Notification** to trigger delivery.
+
+<Info>
+  Because `$onlyOnDetail` is `true`, the action does not appear in bulk-action menus on the notification index. It can only be triggered from an individual notification's detail view.
+</Info>

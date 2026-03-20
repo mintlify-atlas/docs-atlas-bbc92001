@@ -1,0 +1,119 @@
+---
+title: "EmailNotification"
+description: "Sends notifications via Laravel Mail with mailable support."
+---
+
+**Class:** `Opscale\NotificationCenter\Notifications\EmailNotification`  
+**Channel identifier:** `email`  
+**Underlying driver:** `Illuminate\Notifications\Channels\MailChannel`
+
+`EmailNotification` delivers a notification via Laravel's built-in mail channel. It builds a `MailMessage` directly from the delivery's notification content and routes it through whatever mail driver is configured in your Laravel application.
+
+## Method signatures
+
+```php
+class EmailNotification extends Notification
+{
+    public function via(object $notifiable): array
+
+    public function toMail(object $notifiable): MailMessage
+}
+```
+
+### `via()`
+
+Returns `[MailChannel::class]`, routing the notification through `Illuminate\Notifications\Channels\MailChannel`.
+
+### `toMail(object $notifiable): MailMessage`
+
+Builds and returns the `Illuminate\Notifications\Messages\MailMessage`. The message is composed as follows:
+
+| Field | Source |
+|---|---|
+| Subject | `$delivery->notification->subject` |
+| Greeting | `"Hello {$notifiable->name}"` (translated prefix) |
+| Body line | `$delivery->notification->summary` if set, otherwise `$delivery->notification->body` |
+| Action button | "View" linking to the tracked open route (only included when `open_slug` is set) |
+
+## Mailable classes
+
+The package also ships two standalone mailables used for other purposes:
+
+### `RenderTemplate`
+
+**Class:** `Opscale\NotificationCenter\Mailables\RenderTemplate`
+
+```php
+class RenderTemplate extends Mailable
+{
+    public function __construct(
+        public Notification $notification,
+        public ?string $actionUrl = null,
+    )
+
+    public function envelope(): Envelope
+
+    public function content(): Content
+}
+```
+
+Used to render a notification template as an email preview. The envelope subject is taken from `$notification->subject`. The content view is `notification-center::notifications.mail`.
+
+### `SubscribeTemplate`
+
+**Class:** `Opscale\NotificationCenter\Mailables\SubscribeTemplate`
+
+```php
+class SubscribeTemplate extends Mailable
+{
+    public function __construct(
+        public string $registerUrl,
+        public string $swUrl,
+        public string $vapidPublicKey,
+    )
+
+    public function envelope(): Envelope
+
+    public function content(): Content
+}
+```
+
+Sent to users to prompt them to subscribe to browser push notifications. The subject is `"Subscribe to Push Notifications"` (translated). The content view is `notification-center::webpush.subscribe`.
+
+<ParamField body="registerUrl" type="string" required>
+  URL the browser calls to register the push subscription.
+</ParamField>
+
+<ParamField body="swUrl" type="string" required>
+  URL to the service worker script that handles push events.
+</ParamField>
+
+<ParamField body="vapidPublicKey" type="string" required>
+  VAPID public key used when subscribing the browser to push notifications.
+</ParamField>
+
+## Usage example
+
+The `email` channel is the sole channel in the `marketing` strategy and is also included in `system`:
+
+```php
+// config/notification-center.php
+'strategies' => [
+    'marketing' => [
+        'queue'    => 'notifications-marketing',
+        'channels' => ['email'],
+        // ...
+    ],
+    'system' => [
+        'queue'    => 'notifications-system',
+        'channels' => ['webpush', 'email'],
+        // ...
+    ],
+],
+```
+
+The notifiable model must implement `routeNotificationForMail()` or have a `email` attribute for Laravel's mail channel to resolve the recipient address.
+
+<Note>
+Email delivery respects the `days` and `hours` windows defined in the strategy config. Marketing emails are restricted to weekdays between 09:00 and 18:00 by default.
+</Note>

@@ -1,0 +1,179 @@
+---
+title: "Audience model"
+description: "Eloquent model for targeting groups of profiles with Static, Dynamic, or Segment types."
+---
+
+## Class
+
+`Opscale\NotificationCenter\Models\Audience`
+
+Extends `Illuminate\Database\Eloquent\Model`. Uses `AudienceRepository`, `HasUlids`, `SoftDeletes`, and `ValidatorTrait`.
+
+**Database table:** `notification_center_audiences`
+
+## Attributes
+
+<ResponseField name="id" type="string" required>
+  ULID primary key, auto-generated on creation.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Human-readable name for the audience (e.g. `"Premium subscribers"`).
+</ResponseField>
+
+<ResponseField name="description" type="string" required>
+  Longer description explaining the purpose or composition of this audience.
+</ResponseField>
+
+<ResponseField name="type" type="AudienceType" required>
+  Determines how the member profiles are resolved. Cast to the `AudienceType` enum.
+</ResponseField>
+
+<ResponseField name="criteria" type="string | array | null">
+  Resolution criteria whose meaning depends on `type`:
+  - **Static** — not used; members are managed via the pivot table directly.
+  - **Dynamic** — a raw SQL query string that returns rows with an `id` column corresponding to profile IDs.
+  - **Segment** — a comma-separated string of tag names used to match profiles via `Profile::withAnyTags()`.
+
+  Stored as `text` in the database; cast to `array` by Eloquent.
+</ResponseField>
+
+<ResponseField name="total_members" type="integer">
+  Cached count of the resolved profiles. Updated automatically by `getProfiles()` for Dynamic and Segment audiences. Defaults to `0`.
+</ResponseField>
+
+<ResponseField name="created_at" type="Carbon\Carbon | null">
+  Timestamp of when the record was created.
+</ResponseField>
+
+<ResponseField name="updated_at" type="Carbon\Carbon | null">
+  Timestamp of the last update.
+</ResponseField>
+
+<ResponseField name="deleted_at" type="Carbon\Carbon | null">
+  Soft-delete timestamp. Present when the record has been soft-deleted.
+</ResponseField>
+
+## Enums
+
+### AudienceType
+
+`Opscale\NotificationCenter\Models\Enums\AudienceType`
+
+| Value | String | Description |
+|-------|--------|-------------|
+| `STATIC` | `'Static'` | A fixed, manually-curated list of profiles. Members are managed through the `notification_center_audience_profile` pivot table. |
+| `DYNAMIC` | `'Dynamic'` | Membership is resolved at dispatch time by executing the raw SQL stored in `criteria`. Any profile whose ID is returned by the query is included. |
+| `SEGMENT` | `'Segment'` | Membership is resolved by matching profile tags. The `criteria` field holds a comma-separated list of tag names; profiles with any matching tag are included. |
+
+## Relationships
+
+### profiles
+
+Returns `BelongsToMany` — the `Profile` records explicitly attached to this audience (relevant for **Static** audiences). The pivot table is `notification_center_audience_profile`.
+
+```php
+$audience->profiles; // Illuminate\Database\Eloquent\Collection<Profile>
+```
+
+### notifications
+
+Returns `BelongsToMany` — the `Notification` records that target this audience via the `notification_center_audience_notification` pivot table.
+
+```php
+$audience->notifications; // Illuminate\Database\Eloquent\Collection<Notification>
+```
+
+## Repository pattern
+
+The `AudienceRepository` trait mixed into this model provides the `getProfiles()` method, which resolves the correct set of profiles based on the audience `type`.
+
+### `getProfiles()`
+
+Returns `Illuminate\Database\Eloquent\Collection<Profile>` — the resolved profiles for this audience.
+
+```php
+$profiles = $audience->getProfiles();
+```
+
+Internally, the method delegates to one of three private helpers depending on the audience type:
+
+<Expandable title="Resolution logic per type">
+
+**Static**
+
+Returns `$this->profiles` directly from the pivot relationship. No SQL is executed beyond the standard relationship query.
+
+**Dynamic**
+
+Executes `DB::select($this->criteria)` and collects the returned `id` values. Profiles are then loaded with `Profile::whereIn('id', $ids)->get()`. `total_members` is updated silently via `updateQuietly()`.
+
+```php
+// Example criteria value for a Dynamic audience
+'SELECT id FROM notification_center_profiles WHERE created_at > \'2025-01-01\''
+```
+
+**Segment**
+
+Splits `$this->criteria` on commas, trims whitespace, and calls `Profile::withAnyTags($tags)->get()`. Requires the `spatie/laravel-tags` package. `total_members` is updated silently.
+
+```php
+// Example criteria value for a Segment audience
+'vip, early-adopter, beta-tester'
+```
+
+</Expandable>
+
+<Warning>
+  **Dynamic** audiences execute a raw SQL string stored in the database. Ensure that only trusted administrators can create or modify Dynamic audiences to avoid SQL injection risk.
+</Warning>
+
+<Note>
+  `total_members` is a cached value and is only refreshed when `getProfiles()` is called for Dynamic and Segment types. For Static audiences it is not automatically maintained — update it manually if you need an accurate count.
+</Note>
+
+## Usage examples
+
+### Creating a Static audience
+
+```php
+use Opscale\NotificationCenter\Models\Audience;
+use Opscale\NotificationCenter\Models\Enums\AudienceType;
+
+$audience = Audience::create([
+    'name'        => 'VIP customers',
+    'description' => 'Hand-picked high-value customers.',
+    'type'        => AudienceType::STATIC,
+]);
+
+// Attach profiles manually
+$audience->profiles()->attach([$profileA->id, $profileB->id]);
+```
+
+### Creating a Segment audience
+
+```php
+$audience = Audience::create([
+    'name'        => 'Beta testers',
+    'description' => 'All profiles tagged as beta-tester.',
+    'type'        => AudienceType::SEGMENT,
+    'criteria'    => 'beta-tester',
+]);
+
+// Resolve members at dispatch time
+$profiles = $audience->getProfiles();
+```
+
+### Creating a Dynamic audience
+
+```php
+$audience = Audience::create([
+    'name'        => 'New users (last 30 days)',
+    'description' => 'Profiles created in the past 30 days.',
+    'type'        => AudienceType::DYNAMIC,
+    'criteria'    => "SELECT id FROM notification_center_profiles WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+]);
+
+$profiles = $audience->getProfiles(); // executes the raw SQL
+echo $audience->total_members; // updated automatically
+```

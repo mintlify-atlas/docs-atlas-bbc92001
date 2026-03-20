@@ -1,0 +1,164 @@
+---
+title: "ForceDelivery action"
+description: "Nova action that forces immediate re-delivery of a notification bypassing scheduling constraints."
+---
+
+## Overview
+
+`Opscale\NotificationCenter\Nova\Actions\ForceDelivery` is a Laravel Nova action available on the **Delivery** resource detail view. It immediately re-sends a notification to the delivery's profile on the delivery's configured channel, skipping all scheduling windows, timeout checks, and status gate-keeping that `ExecuteNotificationStrategy` normally enforces.
+
+```php
+use Opscale\NotificationCenter\Nova\Actions\ForceDelivery;
+```
+
+---
+
+## Class signature
+
+```php
+class ForceDelivery extends Action
+{
+    use InteractsWithQueue, Queueable;
+
+    public bool $onlyOnDetail = true;
+
+    public function name(): string;
+
+    public function handle(ActionFields $fields, Collection $models): mixed;
+
+    public function fields(NovaRequest $request): array;
+}
+```
+
+---
+
+## Availability
+
+| Property | Value |
+|---|---|
+| `$onlyOnDetail` | `true` — only visible on the Delivery detail page |
+| Resource | Delivery |
+| Fields | None — no form fields required |
+
+---
+
+## What happens when the action runs
+
+<Steps>
+  <Step title="Resolve the channel message class">
+    For each selected `Delivery` model the action reads the channel and looks it up in `config('notification-center.messages')`:
+
+    ```php
+    $channel   = $delivery->channel;
+    $messages  = config('notification-center.messages', []);
+    ```
+
+    If no notification class is configured for that channel, the action returns an error immediately:
+
+    ```php
+    return Action::danger(
+        __('No notification class configured for channel: :channel',
+            ['channel' => $channel])
+    );
+    ```
+  </Step>
+
+  <Step title="Resolve the profile">
+    The profile is loaded from the delivery relationship:
+
+    ```php
+    $profile = $delivery->profile;
+    ```
+
+    If the profile cannot be found the action returns an error:
+
+    ```php
+    return Action::danger(__('Profile not found for this delivery.'));
+    ```
+  </Step>
+
+  <Step title="Send immediately">
+    The notification class is instantiated with the existing `Delivery` model and sent via `notify()` — bypassing queues, time windows, and the hourly scheduler:
+
+    ```php
+    $profile->notify(new $notificationClass($delivery));
+    ```
+  </Step>
+
+  <Step title="Confirm success">
+    A success message is returned to the Nova UI:
+
+    ```php
+    return Action::message(__('Notification(s) sent successfully!'));
+    ```
+  </Step>
+</Steps>
+
+---
+
+## `handle` method signature
+
+```php
+public function handle(ActionFields $fields, Collection $models): mixed
+```
+
+<ParamField path="fields" type="ActionFields" required>
+  The submitted form fields. `ForceDelivery` defines no fields, so this object is empty.
+</ParamField>
+
+<ParamField path="models" type="Illuminate\Support\Collection" required>
+  The collection of `Delivery` models to force-send. Each delivery is processed individually in sequence; an error on one delivery halts processing of subsequent ones and returns a danger response.
+</ParamField>
+
+---
+
+## What it bypasses
+
+| Normal constraint | Bypassed? |
+|---|---|
+| Strategy time window (`days` / `hours`) | Yes |
+| Channel timeout (`timeout_per_channel`) | Yes |
+| Delivery status guards (`OPENED`, `VERIFIED`) | Yes |
+| Hourly scheduler | Yes |
+| Queue delay / `retry_interval` | Yes |
+| `max_attempts` limit | Yes |
+
+<Warning>
+  Force-delivering a notification that is already in a terminal status (`OPENED`, `VERIFIED`, `FAILED`, `EXPIRED`) will send it again but **will not reset the delivery status**. The `TrackEvent` listener may log a status-transition warning if the resulting `SENT` event is invalid for the current status.
+</Warning>
+
+---
+
+## When to use ForceDelivery
+
+- **Debugging** — verify that a channel integration is working correctly without waiting for the scheduler.
+- **Resending failed deliveries** — when a delivery has status `FAILED` due to a transient provider error and you want to retry immediately without creating a new `Delivery` record.
+- **Time-sensitive situations** — when a scheduled delivery has not fired yet but the recipient needs the notification right now.
+- **Testing webhooks or receipt tracking** — trigger a real send to observe downstream event tracking.
+
+---
+
+## Usage in Nova
+
+Register the action on your Delivery Nova resource:
+
+```php
+use Opscale\NotificationCenter\Nova\Actions\ForceDelivery;
+
+public function actions(NovaRequest $request): array
+{
+    return [
+        new ForceDelivery(),
+    ];
+}
+```
+
+The action appears in the **Actions** dropdown on the delivery detail page. Click **Force Delivery** — no form fields are shown — and confirm to send immediately.
+
+<Info>
+  Because `$onlyOnDetail` is `true`, `ForceDelivery` does not appear in bulk-action menus on the delivery index. You must navigate to an individual delivery's detail view to trigger it.
+</Info>
+
+<Tip>
+  Pair `ForceDelivery` with the delivery status filters in Nova to quickly find all `Failed` deliveries and re-trigger them one by one during an incident.
+</Tip>

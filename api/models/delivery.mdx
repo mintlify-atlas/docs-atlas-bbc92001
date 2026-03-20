@@ -1,0 +1,166 @@
+---
+title: "Delivery model"
+description: "Eloquent model representing a single channel delivery attempt for a notification."
+---
+
+## Class
+
+`Opscale\NotificationCenter\Models\Delivery`
+
+Extends `Illuminate\Database\Eloquent\Relations\Pivot`. Uses `DeliveryRepository`, `HasUlids`, and `ValidatorTrait`.
+
+**Database table:** `notification_center_deliveries`
+
+<Info>
+  `Delivery` extends `Pivot` rather than `Model` because it sits at the intersection of a notification and a profile, but it carries its own ULID primary key and additional behavioural logic.
+</Info>
+
+## Attributes
+
+<ResponseField name="id" type="string" required>
+  ULID primary key, auto-generated on creation.
+</ResponseField>
+
+<ResponseField name="profile_id" type="string" required>
+  Foreign key referencing `notification_center_profiles.id`.
+</ResponseField>
+
+<ResponseField name="notification_id" type="string" required>
+  Foreign key referencing `notification_center_notifications.id`.
+</ResponseField>
+
+<ResponseField name="channel" type="string" required>
+  The notification channel used for this delivery attempt (e.g. `mail`, `webpush`, `vonage`, `slack`).
+</ResponseField>
+
+<ResponseField name="status" type="DeliveryStatus">
+  Current lifecycle status of this delivery. Cast to the `DeliveryStatus` enum. Defaults to `Pending`.
+</ResponseField>
+
+<ResponseField name="open_slug" type="string | null">
+  A unique 5-character random string generated automatically on creation. Used to build open-tracking URLs. Indexed and unique across all deliveries.
+</ResponseField>
+
+<ResponseField name="action_slug" type="string | null">
+  A unique 5-character random string generated automatically on creation **only when** the parent notification has an `action` URL. Used to track click-through events. Indexed and unique across all deliveries.
+</ResponseField>
+
+<ResponseField name="created_at" type="Carbon\Carbon | null">
+  Timestamp of when the delivery record was created.
+</ResponseField>
+
+<ResponseField name="updated_at" type="Carbon\Carbon | null">
+  Timestamp of the last update to the delivery record.
+</ResponseField>
+
+## Enums
+
+### DeliveryStatus
+
+`Opscale\NotificationCenter\Models\Enums\DeliveryStatus`
+
+| Value | String | Description |
+|-------|--------|-------------|
+| `PENDING` | `'Pending'` | Notification is queued and waiting to be sent. |
+| `FAILED` | `'Failed'` | Notification failed to be delivered. Terminal state. |
+| `SENT` | `'Sent'` | Notification has been sent to the recipient. |
+| `RECEIVED` | `'Received'` | Notification has been received by the recipient. |
+| `OPENED` | `'Opened'` | Notification has been opened by the recipient. |
+| `VERIFIED` | `'Verified'` | Notification has been read or acknowledged. Terminal state. |
+| `EXPIRED` | `'Expired'` | Notification expired before being verified. Terminal state. |
+
+#### Status transition rules
+
+The `DeliveryStatus` enum enforces a strict state machine via `canTransitionTo()` and `allowedTransitions()`.
+
+| From | Allowed transitions |
+|------|--------------------|
+| `Pending` | `Sent`, `Failed`, `Expired` |
+| `Sent` | `Received`, `Opened`, `Expired` |
+| `Received` | `Opened`, `Verified`, `Expired` |
+| `Opened` | `Verified`, `Expired` |
+| `Verified` | _(terminal)_ |
+| `Failed` | _(terminal)_ |
+| `Expired` | _(terminal)_ |
+
+```php
+use Opscale\NotificationCenter\Models\Enums\DeliveryStatus;
+
+$current = DeliveryStatus::SENT;
+
+if ($current->canTransitionTo(DeliveryStatus::RECEIVED)) {
+    $delivery->update(['status' => DeliveryStatus::RECEIVED]);
+}
+```
+
+## Relationships
+
+### profile
+
+Returns `BelongsTo` — the `Profile` that this delivery targets.
+
+```php
+$delivery->profile; // Profile
+```
+
+### notification
+
+Returns `BelongsTo` — the `Notification` this delivery belongs to.
+
+```php
+$delivery->notification; // Notification
+```
+
+### events
+
+Returns `HasMany` — the `Event` records that have been logged against this delivery (e.g. open, click events).
+
+```php
+$delivery->events; // Illuminate\Database\Eloquent\Collection<Event>
+```
+
+## Tracking slugs
+
+Both `open_slug` and `action_slug` are generated automatically by the `DeliveryRepository` trait in the model's `creating` lifecycle hook.
+
+```php
+// DeliveryRepository boot hook (fires on Delivery::creating)
+static::creating(function ($delivery) {
+    $delivery->open_slug = Str::random(5);
+
+    if ($delivery->notification?->action) {
+        $delivery->action_slug = Str::random(5);
+    }
+});
+```
+
+- **`open_slug`** — Always present. Embed this in an invisible tracking pixel or redirect URL to record that the recipient opened the notification.
+- **`action_slug`** — Only generated when the notification has a non-null `action` field. Use this in the call-to-action link to record click-through events.
+
+<Tip>
+  Both slugs are stored with a unique database constraint. The 5-character random string provides a short, URL-safe token suitable for use in tracking endpoints.
+</Tip>
+
+<Warning>
+  There is no soft-delete on `Delivery`. Deleting a `Profile` or `Notification` cascades and permanently removes associated delivery records.
+</Warning>
+
+## Usage example
+
+```php
+use Opscale\NotificationCenter\Models\Delivery;
+use Opscale\NotificationCenter\Models\Enums\DeliveryStatus;
+
+// Find a delivery by its open-tracking slug
+$delivery = Delivery::where('open_slug', $slug)->firstOrFail();
+
+// Advance status to Opened if the transition is permitted
+if ($delivery->status->canTransitionTo(DeliveryStatus::OPENED)) {
+    $delivery->update(['status' => DeliveryStatus::OPENED]);
+}
+
+// Inspect all events logged for this delivery
+foreach ($delivery->events as $event) {
+    echo $event->name . ': ' . json_encode($event->payload);
+}
+```

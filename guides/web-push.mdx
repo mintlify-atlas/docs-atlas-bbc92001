@@ -1,0 +1,168 @@
+---
+title: "Web push notifications"
+description: "Set up browser push notifications via service workers with the webpush channel."
+---
+
+<Warning>
+  Web push requires **HTTPS**. Service workers are only available in secure contexts. Your application must be served over HTTPS in every environment where the `webpush` channel is enabled — including local development if you intend to test push subscriptions.
+</Warning>
+
+The `webpush` channel delivers browser push notifications to users who have subscribed via a service worker. It uses the [laravel-notification-channels/webpush](https://github.com/laravel-notification-channels/webpush) package and the Web Push Protocol with VAPID authentication.
+
+## How Web Push works
+
+```
+User visits app (HTTPS)
+  │
+  └─ Service worker registered in browser
+       │
+       └─ Browser requests push permission
+            │
+            └─ User grants permission → push subscription saved (profile.pushSubscriptions)
+                 │
+                 └─ Notification published → ExecuteNotificationStrategy dispatched
+                      │
+                      └─ WebPushNotification sent to push endpoint
+                           │
+                           └─ Browser receives push → notification displayed
+```
+
+Each user profile stores its push subscriptions. The `WebPushNotification` class retrieves them:
+
+```php
+// src/Notifications/WebPushNotification.php
+public function getSubscription(): mixed
+{
+    return $this->delivery->profile->pushSubscriptions;
+}
+```
+
+## VAPID keys setup
+
+The `laravel-notification-channels/webpush` package requires a VAPID key pair for authenticating push messages with browser push services.
+
+<Steps>
+  <Step title="Install the webpush package">
+    ```bash
+    composer require laravel-notification-channels/webpush
+    ```
+  </Step>
+
+  <Step title="Generate VAPID keys">
+    ```bash
+    php artisan webpush:vapid
+    ```
+
+    This outputs a `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`. Add them to your `.env` file:
+
+    ```bash
+    VAPID_PUBLIC_KEY=your-public-key-here
+    VAPID_PRIVATE_KEY=your-private-key-here
+    ```
+  </Step>
+
+  <Step title="Run webpush migrations">
+    The package needs a `push_subscriptions` table:
+
+    ```bash
+    php artisan migrate
+    ```
+  </Step>
+
+  <Step title="Add HasPushSubscriptions to your notifiable model">
+    ```php
+    use NotificationChannels\WebPush\HasPushSubscriptions;
+
+    class User extends Authenticatable
+    {
+        use HasPushSubscriptions;
+    }
+    ```
+  </Step>
+</Steps>
+
+## The webpush channel identifier
+
+Register the channel in `config/notification-center.php`:
+
+```php
+'messages' => [
+    'webpush' => \Opscale\NotificationCenter\Notifications\WebPushNotification::class,
+    // ...
+],
+```
+
+Then include `webpush` in a strategy's channel list:
+
+```php
+'alert' => [
+    'channels' => ['webpush', 'whatsapp', 'card'],
+    // ...
+],
+```
+
+## The WebPushNotification class
+
+```php
+// src/Notifications/WebPushNotification.php
+public function via(object $notifiable): array
+{
+    return [WebPushChannel::class];
+}
+
+public function toWebPush(object $notifiable, mixed $notification): WebPushMessage
+{
+    $model = $this->delivery->notification;
+
+    $message = (new WebPushMessage)
+        ->title($model->subject)
+        ->body($model->summary)
+        ->icon(asset('favicon.png'));
+
+    $message->action(
+        __('More Details'),
+        route('notification-center.track.open', $this->delivery->open_slug)
+    );
+
+    return $message;
+}
+```
+
+The push message is built from the notification's **subject** (title), **summary** (body), and a tracking URL for the action button. The tracking URL records an open event when the user taps the notification.
+
+## Subscribing users
+
+The **Notifications Dashboard** shows a prompt card when a user has no active push subscriptions:
+
+```php
+// src/Nova/Dashboards/NotificationsDashboard.php
+if ($profile->pushSubscriptions()->doesntExist()) {
+    $cards[] = NotificationCard::make()
+        ->title(__('Enable Push Notifications'))
+        ->actionLabel(__('Subscribe'))
+        ->actionUrl(route('notification-center.webpush.subscribe', $profile->id))
+        ->actionTarget('_blank');
+}
+```
+
+The subscribe route is registered automatically by the package's service provider.
+
+## Mobile service worker compatibility
+
+Version 1.1.6 shipped a fix for service worker compatibility on mobile devices (`fix(webpush): fixed service worker compatibility with mobile`). Ensure you are on **v1.1.6 or later** for reliable push delivery on iOS and Android browsers.
+
+<Accordion title="Troubleshooting push subscriptions">
+  **Subscription not saved**
+  - Confirm the app is served over HTTPS (including `localhost` via a reverse proxy or `https://` scheme).
+  - Verify `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set in `.env`.
+  - Check the browser console for service worker registration errors.
+
+  **Push notifications not appearing**
+  - Ensure the user granted browser notification permission.
+  - On mobile, confirm you are on v1.1.6+ for the service worker compatibility fix.
+  - Check that the `webpush` channel appears in the strategy's `channels` array.
+  - Confirm the profile has `pushSubscriptions` by checking the **Subscriptions** tab on the Profile detail view.
+
+  **Force delivery for testing**
+  - Open a delivery record in Nova and run **Actions → Force Delivery** to bypass the scheduler and immediately dispatch the notification.
+</Accordion>

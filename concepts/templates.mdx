@@ -1,0 +1,83 @@
+---
+title: "Templates"
+description: "Define notification content with Nova Dynamic Resources templates."
+---
+
+A **Template** is a reusable content blueprint that defines the fields, structure, and default values for a notification. Templates are powered by the [`opscale-co/nova-dynamic-resources`](https://github.com/opscale-co/nova-dynamic-resources) package, which provides dynamic field rendering inside Laravel Nova.
+
+## What a Template Does
+
+Instead of filling in every notification field from scratch each time, a template pre-defines the shape of the notification content. When a notification references a template, the Nova edit form renders the fields declared by that template, allowing editors to fill in the content in a structured, validated way.
+
+Templates can specify:
+
+- **Fields** — the input fields shown when editing a notification (e.g., subject line, body copy, CTA label, image URL).
+- **Default values** — pre-populated content that editors can override.
+- **Notification type** — a template can lock in a specific `NotificationType`, ensuring all notifications created from it use the correct delivery strategy.
+
+## Integration with Nova Dynamic Resources
+
+The `Notification` model uses the `UsesTemplate` concern from `opscale-co/nova-dynamic-resources`:
+
+```php
+use Opscale\NovaDynamicResources\Models\Concerns\UsesTemplate;
+
+class Notification extends Model
+{
+    use HasUlids, SoftDeletes, UsesTemplate, ValidatorTrait;
+
+    // ...
+
+    protected $fillable = [
+        // ...
+        'template_id',  // Foreign key to the template
+        'data',         // JSON bag for template-defined field values
+    ];
+
+    protected $casts = [
+        // ...
+        'data' => 'array',
+    ];
+}
+```
+
+The `data` field stores all values for the template-defined fields as a JSON object. The `UsesTemplate` concern handles loading the correct field definitions and merging them with the notification's stored data at render time.
+
+## How Templates Define Fields for Notifications
+
+Each template class extends the Nova Dynamic Resources base and declares a `fields()` method, returning an array of Nova field instances. These fields are injected into the notification create/edit form in Nova automatically when a template is selected.
+
+This means:
+
+- Different templates can expose entirely different sets of input fields.
+- Field validation rules are defined once in the template and reused across all notifications that reference it.
+- Template fields are stored in the notification's `data` column, keeping the `notifications` table schema stable regardless of template variations.
+
+## Defining Notification Type in a Template
+
+A template can prescribe a `NotificationType`, which is then applied to any notification created from that template. This is useful when you have channel-specific or purpose-specific templates (e.g., an "Urgent Alert" template that always maps to the `Alert` type and its fast-escalation strategy).
+
+<Tip>
+  By encoding the notification type in the template, you prevent editors from accidentally choosing the wrong strategy for a given message type.
+</Tip>
+
+## Managing Templates in Nova
+
+<Steps>
+  <Step title="Navigate to Templates">
+    Open the Nova dashboard and select **Templates** from the sidebar.
+  </Step>
+  <Step title="Create a template">
+    Click **Create Template**, give it a name, and define its fields and any default notification type.
+  </Step>
+  <Step title="Attach to a notification">
+    When creating or editing a notification, select the template from the **Template** field. The form will update to show the template's fields.
+  </Step>
+  <Step title="Fill in content">
+    Complete the template-defined fields. Values are saved to the notification's `data` column.
+  </Step>
+</Steps>
+
+<Note>
+  A notification does not require a template. If no `template_id` is set, the standard `subject`, `body`, `summary`, and `action` fields are used directly.
+</Note>

@@ -1,0 +1,170 @@
+---
+title: "Subscription model"
+description: "Eloquent model managing a profile's push notification subscription for the webpush channel."
+---
+
+## Class
+
+`Opscale\NotificationCenter\Models\Subscription`
+
+Extends `Illuminate\Database\Eloquent\Model`. Uses `HasUlids`, `SoftDeletes`, and `ValidatorTrait`.
+
+**Database table:** `notification_center_subscriptions`
+
+## Overview
+
+A `Subscription` record stores a single verified contact point for a `Profile` on a specific notification channel. The most common use case is webpush: when a user registers a service worker in their browser, the resulting push subscription endpoint and keys are stored here so the `webpush` channel can locate the correct push target at dispatch time.
+
+Multiple subscriptions per profile are supported (e.g. a user might have a mail subscription and a webpush subscription, or webpush subscriptions from multiple devices). A unique constraint on `(profile_id, type, contact)` prevents duplicates.
+
+## Attributes
+
+<ResponseField name="id" type="string" required>
+  ULID primary key, auto-generated on creation.
+</ResponseField>
+
+<ResponseField name="profile_id" type="string" required>
+  Foreign key referencing `notification_center_profiles.id`. Cascades on delete.
+</ResponseField>
+
+<ResponseField name="type" type="string" required>
+  The notification channel this subscription applies to (e.g. `'webpush'`, `'mail'`, `'vonage'`).
+</ResponseField>
+
+<ResponseField name="contact" type="string" required>
+  The channel-specific contact address or endpoint:
+  - **webpush** — the push subscription endpoint URL registered by the service worker.
+  - **mail** — the recipient email address.
+  - **vonage / SMS** — the recipient phone number.
+</ResponseField>
+
+<ResponseField name="verified" type="boolean">
+  Whether the contact address has been verified. Defaults to `false`. Cast to `boolean`.
+</ResponseField>
+
+<ResponseField name="priority" type="integer">
+  Unsigned tiny integer (0–255) indicating dispatch priority when a profile has multiple subscriptions of the same type. Lower values indicate higher priority. Defaults to `5`.
+</ResponseField>
+
+<ResponseField name="created_at" type="Carbon\Carbon | null">
+  Timestamp of when the subscription was created.
+</ResponseField>
+
+<ResponseField name="updated_at" type="Carbon\Carbon | null">
+  Timestamp of the last update.
+</ResponseField>
+
+<ResponseField name="deleted_at" type="Carbon\Carbon | null">
+  Soft-delete timestamp. Present when the subscription has been soft-deleted.
+</ResponseField>
+
+## Relationships
+
+### profile
+
+Returns `BelongsTo` — the `Profile` that owns this subscription.
+
+```php
+$subscription->profile; // Profile
+```
+
+## Unique constraint
+
+The database enforces a composite unique index on `(profile_id, type, contact)`. Attempting to insert a duplicate subscription for the same profile, channel, and contact will throw an integrity constraint violation.
+
+## Webpush subscriptions
+
+When a user grants push notification permission in their browser and the service worker registers successfully, the browser provides a push subscription object containing:
+
+- **endpoint** — the push service URL (stored in `contact`)
+- **keys** (p256dh, auth) — encryption keys used by the push server
+
+The `Profile` model includes the `HasPushSubscriptions` trait from `laravel-notification-channels/webpush`, which handles storing and retrieving these subscriptions.
+
+```js
+// JavaScript: registering a push subscription via the service worker
+const registration = await navigator.serviceWorker.ready;
+const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+});
+
+// POST the subscription object to your Laravel endpoint
+await fetch('/push-subscriptions', {
+    method: 'POST',
+    body: JSON.stringify(subscription),
+    headers: { 'Content-Type': 'application/json' },
+});
+```
+
+```php
+// PHP: store the webpush subscription on the profile
+$profile->updatePushSubscription(
+    endpoint: $request->input('endpoint'),
+    key:      $request->input('keys.p256dh'),
+    token:    $request->input('keys.auth'),
+);
+```
+
+<Note>
+  `updatePushSubscription()` is provided by the `HasPushSubscriptions` trait and will create or update the subscription record automatically, preventing duplicates.
+</Note>
+
+## Usage with webpush notifications
+
+The `Profile::routeNotificationFor()` method checks whether the dispatched notification implements `getSubscription()`. If so, it returns that subscription directly to the webpush channel driver:
+
+```php
+// Inside your notification class
+public function getSubscription(): Subscription
+{
+    return $this->subscription;
+}
+
+public function toWebPush(Profile $profile, $notification): WebPushMessage
+{
+    return (new WebPushMessage)
+        ->title($this->title)
+        ->body($this->body)
+        ->action('View', $this->actionUrl);
+}
+```
+
+## Usage examples
+
+### Creating a subscription manually
+
+```php
+use Opscale\NotificationCenter\Models\Subscription;
+
+$subscription = Subscription::create([
+    'profile_id' => $profile->id,
+    'type'       => 'mail',
+    'contact'    => 'user@example.com',
+    'verified'   => true,
+    'priority'   => 1,
+]);
+```
+
+### Querying verified subscriptions for a profile
+
+```php
+$verifiedSubscriptions = $profile->subscriptions
+    ->where('verified', true)
+    ->sortBy('priority');
+```
+
+### Removing a webpush subscription on unsubscribe
+
+```php
+// Remove a specific push endpoint when the user unsubscribes in the browser
+$profile->deletePushSubscription($endpoint);
+```
+
+<Warning>
+  Soft deletes are enabled on `Subscription`. Deleting the parent `Profile` cascades at the **database** level and permanently removes subscription rows (not soft-deletes). Soft-deleting a profile via Eloquent does not cascade to subscriptions — use explicit cleanup if needed.
+</Warning>
+
+<Tip>
+  Use the `priority` field to control which subscription is used first when a profile has multiple contact points for the same channel. A value of `1` takes precedence over the default of `5`.
+</Tip>

@@ -1,0 +1,140 @@
+---
+title: "Delivery Strategies"
+description: "Configure how and when notifications are delivered using named strategies with channel escalation."
+---
+
+A **delivery strategy** is a named configuration block that controls the full lifecycle of notification delivery for a given [notification type](/concepts/notifications#notification-types). It specifies which channels to use, in what order, when delivery is allowed, and how to handle retries and timeouts.
+
+Strategies are defined in `config/notification-center.php` under the `strategies` key. Each notification type (`marketing`, `transactional`, `system`, `alert`, `reminder`) maps to exactly one strategy.
+
+## Configuration Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `queue` | `string` | Laravel queue name used to process deliveries for this strategy. |
+| `channels` | `string[]` | Ordered list of channel identifiers to attempt. The first channel is tried first; subsequent channels are used for escalation. |
+| `retry_interval` | `int[]` | Seconds between retry attempts. Provide an array for escalating delays (e.g., `[300, 1800]` = 5 min then 30 min). |
+| `max_attempts` | `int` | Maximum number of delivery attempts per channel before giving up. |
+| `timeout_per_channel` | `int` | Hours to wait (within allowed time windows) before escalating to the next channel. |
+| `days` | `int[]` | Days of the week on which delivery is permitted. `0` = Sunday, `6` = Saturday. |
+| `hours` | `string[2]` | Time window for delivery in 24-hour format: `['HH:MM', 'HH:MM']`. |
+
+<Info>
+  `timeout_per_channel` is measured in **effective hours** — time that falls within the allowed `days` and `hours` window. Downtime outside the window does not count toward the timeout.
+</Info>
+
+## Built-in Strategies
+
+```php
+'strategies' => [
+    'marketing' => [
+        'queue'               => 'notifications-marketing',
+        'channels'            => ['email'],
+        'retry_interval'      => [3600],
+        'max_attempts'        => 1,
+        'timeout_per_channel' => 24,
+        'days'                => [1, 2, 3, 4, 5],
+        'hours'               => ['09:00', '18:00'],
+    ],
+    'transactional' => [
+        'queue'               => 'notifications-transactional',
+        'channels'            => ['nova'],
+        'retry_interval'      => [300, 1800],
+        'max_attempts'        => 3,
+        'timeout_per_channel' => 2,
+        'days'                => [0, 1, 2, 3, 4, 5, 6],
+        'hours'               => ['00:00', '23:59'],
+    ],
+    'system' => [
+        'queue'               => 'notifications-system',
+        'channels'            => ['webpush', 'email'],
+        'retry_interval'      => [1800, 3600],
+        'max_attempts'        => 2,
+        'timeout_per_channel' => 12,
+        'days'                => [1, 2, 3, 4, 5],
+        'hours'               => ['08:00', '20:00'],
+    ],
+    'alert' => [
+        'queue'               => 'notifications-alert',
+        'channels'            => ['webpush', 'whatsapp', 'card'],
+        'retry_interval'      => [30, 300, 900],
+        'max_attempts'        => 3,
+        'timeout_per_channel' => 1,
+        'days'                => [0, 1, 2, 3, 4, 5, 6],
+        'hours'               => ['00:00', '23:59'],
+    ],
+    'reminder' => [
+        'queue'               => 'notifications-reminder',
+        'channels'            => ['webpush', 'whatsapp'],
+        'retry_interval'      => [1800],
+        'max_attempts'        => 2,
+        'timeout_per_channel' => 6,
+        'days'                => [1, 2, 3, 4, 5],
+        'hours'               => ['09:00', '19:00'],
+    ],
+],
+```
+
+## Strategy Breakdown
+
+<AccordionGroup>
+  <Accordion title="marketing — email only, business hours">
+    Single channel (`email`), one attempt, weekdays 09:00–18:00 only. Suitable for bulk campaigns where a single send is sufficient and off-hours delivery is undesirable.
+  </Accordion>
+
+  <Accordion title="transactional — nova, any time">
+    Nova in-app feed, up to 3 attempts with escalating retries (5 min, then 30 min), 24/7. Designed for high-fidelity delivery of account and order messages.
+  </Accordion>
+
+  <Accordion title="system — webpush → email escalation">
+    Tries webpush first; if not opened within 12 effective hours (weekdays 08:00–20:00), escalates to email. Good for maintenance notices and platform updates.
+  </Accordion>
+
+  <Accordion title="alert — three-channel rapid escalation">
+    webpush → whatsapp → card, with fast retry intervals (30 s, 5 min, 15 min), 1-hour channel timeout, 24/7. Use for urgent, time-critical messages.
+  </Accordion>
+
+  <Accordion title="reminder — webpush → whatsapp, business hours">
+    Two-channel escalation with a 6-hour effective timeout, weekdays 09:00–19:00. Suitable for task and event reminders.
+  </Accordion>
+</AccordionGroup>
+
+## How Channel Escalation Works
+
+When a notification is published, the `ExecuteNotificationStrategy` job runs and processes each profile in the attached audiences:
+
+<Steps>
+  <Step title="First delivery">
+    A `Delivery` record is created for the **first channel** in the strategy's `channels` array with status `Pending`, and the notification is dispatched.
+  </Step>
+  <Step title="Strategy job reruns">
+    On subsequent runs of the strategy job (e.g., on a schedule or re-queue), the job checks the latest delivery for each profile.
+  </Step>
+  <Step title="Escalation check">
+    If the latest delivery has not reached `Opened` or `Verified`, the job checks whether `timeout_per_channel` effective hours have elapsed since that delivery was created.
+  </Step>
+  <Step title="Next channel">
+    If the timeout has passed and a next channel exists in the list, a new `Delivery` record is created for that channel and dispatched.
+  </Step>
+  <Step title="Terminal states">
+    A profile is skipped entirely if its latest delivery is `Opened` or `Verified`. Escalation stops if there are no remaining channels.
+  </Step>
+</Steps>
+
+<Note>
+  Elapsed time is calculated only within the permitted `days` and `hours` window. A 1-hour `timeout_per_channel` for the `alert` strategy means 1 hour of window-time, not 1 wall-clock hour if the window is inactive.
+</Note>
+
+## Escalating Retry Intervals
+
+The `retry_interval` array maps directly to Laravel's `backoff` property on the queued notification. Providing multiple values creates an escalating back-off:
+
+```php
+// alert strategy: 30 s, then 5 min, then 15 min
+'retry_interval' => [30, 300, 900],
+
+// transactional strategy: 5 min, then 30 min
+'retry_interval' => [300, 1800],
+```
+
+If the array is shorter than `max_attempts`, Laravel repeats the last value for remaining attempts.

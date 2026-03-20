@@ -1,0 +1,146 @@
+---
+title: "Audience segmentation"
+description: "Create and manage Static, Dynamic, and Segment audiences to target the right users."
+---
+
+Audiences let you define who receives a notification. The package supports three audience types — **Static**, **Dynamic**, and **Segment** — each suited to different targeting strategies. Audiences are managed through the Nova **Audiences** resource and attached to notifications at publish time.
+
+## Audience types
+
+<CardGroup cols={2}>
+  <Card title="Static" icon="users">
+    A manually curated list of profiles. Members are set explicitly and do not change unless you add or remove them.
+  </Card>
+  <Card title="Dynamic" icon="filter">
+    Membership is resolved at query time based on criteria rules. The audience always reflects the current state of your data.
+  </Card>
+  <Card title="Segment" icon="tag">
+    A named, reusable cohort defined by shared profile attributes. Useful for recurring targeting groups like "power users" or "trial users".
+  </Card>
+  <Card title="Total Members" icon="chart-bar">
+    Displayed on the audience detail view and updated automatically. Sortable on the index list for quick comparison.
+  </Card>
+</CardGroup>
+
+## Creating a Static audience
+
+<Steps>
+  <Step title="Navigate to Audiences">
+    In the Nova sidebar go to **Notification Center → Audiences → New Audience**.
+  </Step>
+
+  <Step title="Fill in audience details">
+    ```php
+    // src/Nova/Audience.php — Audience fields
+    Text::make(__('Name'), 'name')
+        ->rules('required', 'string', 'max:255'),
+
+    Textarea::make(__('Description'), 'description')
+        ->rules('required', 'string'),
+
+    Select::make(__('Type'), 'type')
+        ->options([
+            AudienceType::STATIC->value  => __('Static'),
+            AudienceType::DYNAMIC->value => __('Dynamic'),
+            AudienceType::SEGMENT->value => __('Segment'),
+        ]),
+    ```
+
+    Set **Type** to **Static** and save.
+  </Step>
+
+  <Step title="Attach profiles">
+    Open the saved audience. Switch to the **Profiles** tab and use the **Attach Profile** button to add individual profiles to the audience.
+
+    The `profiles` relationship is managed via a `BelongsToMany` pivot:
+
+    ```php
+    // src/Nova/Audience.php
+    Tab::make(__('Profiles'), [
+        BelongsToMany::make(__('Profiles'), 'profiles', Profile::class),
+    ]),
+    ```
+  </Step>
+</Steps>
+
+## Creating a Dynamic audience
+
+Set **Type** to **Dynamic** when creating the audience. Dynamic audiences evaluate membership at dispatch time using criteria rules stored against the audience record, so the target list always reflects your live data without manual updates.
+
+## Creating a Segment
+
+Set **Type** to **Segment** to define a reusable cohort based on shared profile attributes. Segments are ideal for groups that recur across multiple notification campaigns (e.g., "free-tier users", "churned accounts").
+
+## Creating an audience from the Profiles resource
+
+You can create a Static audience directly from a selection of profiles using the **Create Audience** Nova Action, available on the Profiles index:
+
+```php
+// src/Nova/Actions/CreateAudience.php
+public function handle(ActionFields $fields, Collection $models)
+{
+    $audience = Audience::create([
+        'name'          => $fields->get('name'),
+        'description'   => $fields->get('description'),
+        'type'          => AudienceType::STATIC,
+        'total_members' => $models->count(),
+    ]);
+
+    $audience->profiles()->attach($models->pluck('id'));
+
+    return Action::message(__(':count profile(s) added to audience ":name".', [
+        'count' => $models->count(),
+        'name'  => $audience->name,
+    ]));
+}
+```
+
+The action fields accept a **Name** (required, max 255 chars) and an optional **Description** (max 500 chars). The resulting audience is always of type `STATIC` with all selected profiles pre-attached.
+
+<Tip>
+  Use the **Create Audience** action when you have already filtered the Profiles index to exactly the users you want to target. Select all matching profiles and run the action in one step.
+</Tip>
+
+## Attaching audiences to notifications
+
+Audiences are attached when you publish a notification via **Actions → Publish Notification** on the notification detail view. The action's `audience_id` select field lists all available audiences by name:
+
+```php
+// src/Nova/Actions/PublishNotification.php
+Select::make(__('Audience'), 'audience_id')
+    ->options(Audience::pluck('name', 'id'))
+    ->rules('required'),
+```
+
+After confirmation the audience is attached and `ExecuteNotificationStrategy` is dispatched, which resolves the audience's profiles and creates per-profile delivery records.
+
+## Profile management in Nova
+
+Profiles are the bridge between your application's notifiable models (e.g., `User`) and the notification system. The **Profile** resource exposes:
+
+| Field | Description |
+|-------|-------------|
+| **Notifiable** | Polymorphic `MorphTo` — any model using the `Notifiable` trait is eligible |
+| **Created At / Updated At** | Displayed as relative times (`diffForHumans`) |
+| **Subscriptions** | Push subscriptions attached to this profile (see the Subscriptions tab) |
+
+```php
+// src/Nova/Profile.php — notifiable types resolved dynamically
+protected function getNotifiableResourceTypes(): array
+{
+    return collect(Nova::$resources)
+        ->filter(function ($resource) {
+            $model  = $resource::$model ?? null;
+            $traits = class_uses_recursive($model);
+            return in_array(Notifiable::class, $traits);
+        })
+        ->values()
+        ->all();
+}
+```
+
+Only models that use Laravel's `Notifiable` trait appear as options when creating a profile.
+
+<Note>
+  A profile must exist for a user before they can be targeted. Create profiles for your users as part of your application's registration flow or via a data migration.
+</Note>

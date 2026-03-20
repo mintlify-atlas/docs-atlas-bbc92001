@@ -1,0 +1,92 @@
+---
+title: "WebPushNotification"
+description: "Delivers browser push notifications via service workers."
+---
+
+**Class:** `Opscale\NotificationCenter\Notifications\WebPushNotification`  
+**Channel identifier:** `webpush`  
+**Underlying driver:** `NotificationChannels\WebPush\WebPushChannel`
+
+`WebPushNotification` sends a browser push notification to all active push subscriptions associated with the delivery's profile, using the [laravel-notification-channels/webpush](https://github.com/laravel-notification-channels/webpush) package and the Web Push Protocol.
+
+## Requirements
+
+<Warning>
+Browser push notifications are **only delivered over HTTPS**. Your application must be served from a secure origin in production.
+</Warning>
+
+<Warning>
+**VAPID keys are required.** Generate a VAPID key pair and set `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` in your `.env`. These values are used by the WebPush channel to sign push messages and by `SubscribeTemplate` when registering browser subscriptions.
+</Warning>
+
+## Method signatures
+
+```php
+class WebPushNotification extends Notification
+{
+    public function via(object $notifiable): array
+
+    public function toWebPush(object $notifiable, mixed $notification): WebPushMessage
+
+    public function getSubscription(): mixed
+}
+```
+
+### `via()`
+
+Returns `[WebPushChannel::class]`, routing the notification through the WebPush channel.
+
+### `toWebPush(object $notifiable, mixed $notification): WebPushMessage`
+
+Builds and returns a `NotificationChannels\WebPush\WebPushMessage`. The payload is:
+
+| Field | Source |
+|---|---|
+| Title | `$delivery->notification->subject` |
+| Body | `$delivery->notification->summary` |
+| Icon | `asset('favicon.png')` |
+| Action button | "More Details" linking to the tracked open route |
+
+### `getSubscription(): mixed`
+
+Overrides the base class to return all push subscriptions (`pushSubscriptions`) on the delivery's profile, rather than a single contact value. The WebPush channel iterates these subscriptions and sends to each active browser endpoint.
+
+## What data it sends
+
+The push message delivered to the browser contains:
+
+- A title string from the notification's `subject`
+- A body string from the notification's `summary`
+- An icon loaded from `favicon.png` at the application's public root
+- A "More Details" action button linking to the tracked open URL
+
+## Usage example
+
+The `webpush` channel is included in the `system`, `alert`, and `reminder` strategies by default:
+
+```php
+// config/notification-center.php
+'strategies' => [
+    'alert' => [
+        'queue'    => 'notifications-alert',
+        'channels' => ['webpush', 'whatsapp', 'card'],
+        // ...
+    ],
+],
+```
+
+To subscribe a user to push notifications, send them a `SubscribeTemplate` mailable which includes the registration URL, service worker URL, and VAPID public key:
+
+```php
+use Opscale\NotificationCenter\Mailables\SubscribeTemplate;
+
+Mail::to($user)->send(new SubscribeTemplate(
+    registerUrl: route('notification-center.webpush.register'),
+    swUrl: asset('service-worker.js'),
+    vapidPublicKey: config('webpush.vapid.public_key'),
+));
+```
+
+<Info>
+The notifiable model must use the `HasPushSubscriptions` trait from the `laravel-notification-channels/webpush` package so that `$profile->pushSubscriptions` resolves correctly.
+</Info>

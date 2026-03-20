@@ -1,0 +1,91 @@
+---
+title: "TeamsNotification"
+description: "Sends notifications to Microsoft Teams via webhook."
+---
+
+**Class:** `Opscale\NotificationCenter\Notifications\TeamsNotification`  
+**Channel identifier:** `teams`  
+**Underlying driver:** `NotificationChannels\MicrosoftTeams\MicrosoftTeamsChannel`  
+**Provider:** Microsoft Teams
+
+`TeamsNotification` posts an Adaptive Card to a Microsoft Teams channel using the [laravel-notification-channels/microsoft-teams](https://github.com/laravel-notification-channels/microsoft-teams) package and an incoming webhook URL.
+
+## Requirements
+
+<Note>
+The `laravel-notification-channels/microsoft-teams` Composer package must be installed. An incoming webhook URL must be configured for the target Teams channel.
+</Note>
+
+## Method signatures
+
+```php
+class TeamsNotification extends Notification
+{
+    public function via(object $notifiable): array
+
+    public function toMicrosoftTeams(object $notifiable): MicrosoftTeamsAdaptiveCard
+}
+```
+
+### `via()`
+
+Returns `[MicrosoftTeamsChannel::class]`, routing the notification through the Microsoft Teams channel.
+
+### `toMicrosoftTeams(object $notifiable): MicrosoftTeamsAdaptiveCard`
+
+Builds and returns a `NotificationChannels\MicrosoftTeams\MicrosoftTeamsAdaptiveCard`. The card is composed of:
+
+<ResponseField name="title" type="string" required>
+  Set to `$delivery->notification->subject`.
+</ResponseField>
+
+<ResponseField name="content" type="array" required>
+  An array containing a single `TextBlock` element whose text is `$delivery->notification->summary` if set, otherwise `$delivery->notification->subject`. The text block has `isSubtle` set to `true`.
+</ResponseField>
+
+<ResponseField name="actions" type="array" required>
+  An array containing a single `ActionOpenUrl` element titled "View" with the delivery's tracked open URL.
+</ResponseField>
+
+## What data it sends
+
+The Adaptive Card posted to Teams contains:
+
+| Element | Value |
+|---|---|
+| Card title | Notification `subject` |
+| Body text block | Notification `summary` (falls back to `subject` if absent), rendered as subtle text |
+| Action button | "View" — opens the tracked open URL in a browser |
+
+## Usage example
+
+Add `teams` to a strategy's `channels` array:
+
+```php
+// config/notification-center.php
+'messages' => [
+    'teams' => \Opscale\NotificationCenter\Notifications\TeamsNotification::class,
+    // ...
+],
+
+'strategies' => [
+    'system' => [
+        'queue'    => 'notifications-system',
+        'channels' => ['teams', 'email'],
+        // ...
+    ],
+],
+```
+
+The notifiable model must implement `routeNotificationForMicrosoftTeams()` returning the incoming webhook URL for the target channel:
+
+```php
+public function routeNotificationForMicrosoftTeams(): string
+{
+    return config('services.microsoft_teams.webhook_url');
+}
+```
+
+<Tip>
+Create the incoming webhook URL in Microsoft Teams under **Channel settings → Connectors → Incoming Webhook**. Store the URL in your `.env` and reference it from `config/services.php` rather than hard-coding it.
+</Tip>

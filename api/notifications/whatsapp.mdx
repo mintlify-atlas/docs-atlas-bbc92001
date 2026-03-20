@@ -1,0 +1,92 @@
+---
+title: "WhatsAppNotification"
+description: "Sends WhatsApp messages via Twilio Content Templates."
+---
+
+**Class:** `Opscale\NotificationCenter\Notifications\WhatsAppNotification`  
+**Channel identifier:** `whatsapp`  
+**Underlying driver:** `NotificationChannels\Twilio\TwilioChannel`
+
+`WhatsAppNotification` sends a structured WhatsApp message using a pre-approved Twilio Content Template. The template SID is read from `config('notification-center.whatsapp_content_sid')`, which is populated from the `TWILIO_WHATSAPP_CONTENT_SID` environment variable.
+
+## Requirements
+
+<Warning>
+**`TWILIO_WHATSAPP_CONTENT_SID` is required.** Create a Content Template in the Twilio Console and set this environment variable to its SID (e.g. `HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`). Without it, WhatsApp deliveries will fail.
+</Warning>
+
+<Note>
+The `laravel-notification-channels/twilio` Composer package must be installed and Twilio credentials (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`) must be set in your environment.
+</Note>
+
+## Method signatures
+
+```php
+class WhatsAppNotification extends Notification
+{
+    public function via(object $notifiable): array
+
+    public function toTwilio(object $notifiable): TwilioContentTemplateMessage
+}
+```
+
+### `via()`
+
+Returns `[TwilioChannel::class]`, routing the notification through the Twilio channel (the same driver used for SMS and voice calls).
+
+### `toTwilio(object $notifiable): TwilioContentTemplateMessage`
+
+Builds and returns a `NotificationChannels\Twilio\TwilioContentTemplateMessage` with the following payload:
+
+<ResponseField name="contentSid" type="string" required>
+  The Twilio Content Template SID read from `config('notification-center.whatsapp_content_sid')` (`TWILIO_WHATSAPP_CONTENT_SID`).
+</ResponseField>
+
+<ResponseField name="contentVariables" type="array" required>
+  An associative array of template variable substitutions indexed by position:
+  - `1` → `$delivery->notification->summary`
+  - `2` → `$delivery->open_slug`
+</ResponseField>
+
+## What data it sends
+
+The outbound WhatsApp message is rendered by Twilio using the configured Content Template. The variables injected are:
+
+| Variable index | Value |
+|---|---|
+| `1` | Notification `summary` |
+| `2` | Delivery `open_slug` (for tracking) |
+
+Your Twilio Content Template must define at least two variables (`{{1}}` and `{{2}}`) to receive these values.
+
+## Usage example
+
+Add `whatsapp` to a strategy's `channels` array and set the required environment variable:
+
+```bash
+# .env
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=your_auth_token
+TWILIO_FROM=whatsapp:+14155238886
+TWILIO_WHATSAPP_CONTENT_SID=HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+```php
+// config/notification-center.php
+'strategies' => [
+    'alert' => [
+        'queue'    => 'notifications-alert',
+        'channels' => ['webpush', 'whatsapp', 'card'],
+        // ...
+    ],
+],
+```
+
+The notifiable model must implement `routeNotificationForTwilio()` returning the recipient's WhatsApp-enabled phone number in E.164 format prefixed with `whatsapp:`:
+
+```php
+public function routeNotificationForTwilio(): string
+{
+    return 'whatsapp:' . $this->phone_number;
+}
+```

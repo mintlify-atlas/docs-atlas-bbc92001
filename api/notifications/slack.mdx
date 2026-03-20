@@ -1,0 +1,79 @@
+---
+title: "SlackNotification"
+description: "Sends notifications to Slack channels via Laravel's Slack notification channel."
+---
+
+**Class:** `Opscale\NotificationCenter\Notifications\SlackNotification`  
+**Channel identifier:** `slack`  
+**Underlying driver:** `Illuminate\Notifications\Slack\SlackChannel`
+
+`SlackNotification` posts a structured Block Kit message to a Slack channel using Laravel's built-in Slack notification channel.
+
+## Method signatures
+
+```php
+class SlackNotification extends Notification
+{
+    public function via(object $notifiable): array
+
+    public function toSlack(object $notifiable): SlackMessage
+}
+```
+
+### `via()`
+
+Returns `[SlackChannel::class]`, routing the notification through `Illuminate\Notifications\Slack\SlackChannel`.
+
+### `toSlack(object $notifiable): SlackMessage`
+
+Builds and returns a `Illuminate\Notifications\Slack\SlackMessage` composed of three Block Kit blocks:
+
+| Block | Content |
+|---|---|
+| Header block | `$delivery->notification->subject` |
+| Section block | `$delivery->notification->summary` if set, otherwise `$delivery->notification->subject` |
+| Actions block | A "View" button linking to the tracked open URL |
+
+The message's top-level `text` field (used as the notification fallback in clients that do not render blocks) is also set to `$delivery->notification->subject`.
+
+## What data it sends
+
+The Slack message contains:
+
+- A fallback `text` equal to the notification `subject`
+- A header block with the notification `subject`
+- A section block with the notification `summary` (falls back to `subject` if `summary` is absent)
+- An actions block with a "View" button whose URL is the delivery's tracked open URL
+
+## Usage example
+
+Add `slack` to a strategy's `channels` array:
+
+```php
+// config/notification-center.php
+'messages' => [
+    'slack' => \Opscale\NotificationCenter\Notifications\SlackNotification::class,
+    // ...
+],
+
+'strategies' => [
+    'system' => [
+        'queue'    => 'notifications-system',
+        'channels' => ['slack', 'email'],
+        // ...
+    ],
+],
+```
+
+The notifiable model must implement `routeNotificationForSlack()` returning either a Slack channel name or an incoming webhook URL:
+
+```php
+public function routeNotificationForSlack(): string
+{
+    return config('services.slack.webhook_url');
+}
+```
+
+<Note>
+Laravel's Slack channel requires the `laravel/slack-notification-channel` Composer package (included in Laravel 10+ applications). Ensure a valid Slack bot token or incoming webhook URL is configured.
+</Note>

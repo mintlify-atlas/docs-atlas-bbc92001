@@ -1,0 +1,67 @@
+---
+title: "Introduction"
+description: "Notification Center for Laravel Nova — multi-channel delivery with automatic escalation, smart retries, and tracking."
+---
+
+Notification Center is a Laravel Nova tool that makes sure your users get notified. It provides multi-channel delivery strategies with automatic channel escalation, smart retries, and advanced open/action tracking — so no message goes unnoticed.
+
+## Why use it
+
+- **Multi-channel delivery** — reach users across 9 channels from a single notification
+- **Automatic escalation** — if one channel times out, the next channel in the strategy is attempted automatically
+- **Smart retries** — configurable retry intervals with escalating delays per notification type
+- **Delivery time windows** — restrict sending to specific days and hours per strategy
+- **Audience segmentation** — target the right users with static lists, dynamic queries, or named cohorts
+- **Built-in tracking** — every delivery gets unique open and action slugs; optional Google Analytics integration
+- **Nova-native UI** — manage notifications, templates, audiences, profiles, and deliveries entirely within Laravel Nova
+
+## Delivery strategies
+
+Each notification is assigned one of five types, and each type has its own delivery strategy defined in config. Strategies control which channels to use, in what order, and how aggressively to retry.
+
+| Type | Purpose | Default channels |
+|---|---|---|
+| `Marketing` | Promotional content, newsletters, campaigns | `email` |
+| `Transactional` | Order confirmations, receipts, account updates | `nova` |
+| `System` | Platform updates, maintenance notices | `webpush`, `email` |
+| `Alert` | Urgent notifications requiring immediate attention | `webpush`, `whatsapp`, `card` |
+| `Reminder` | Scheduled reminders for tasks, events, deadlines | `webpush`, `whatsapp` |
+
+Strategies are fully configurable. You can change channels, retry intervals, max attempts, timeout thresholds, and delivery time windows for each type.
+
+## Channels
+
+Nine channels are available out of the box:
+
+| Channel | Identifier | Description |
+|---|---|---|
+| Nova | `nova` | Laravel Nova's native notification bell — real-time alerts in the admin panel |
+| Card | `card` | Visual notification cards on the Notifications Dashboard |
+| Email | `email` | Standard email delivery |
+| SMS | `sms` | Text messages via Twilio |
+| Voice Call | `call` | Voice call delivery via Twilio |
+| WhatsApp | `whatsapp` | WhatsApp messages via Twilio Content Templates |
+| Web Push | `webpush` | Browser push notifications via service workers |
+| Slack | `slack` | Messages delivered to Slack channels |
+| Microsoft Teams | `teams` | Messages delivered to Microsoft Teams channels |
+
+## How the scheduler works
+
+The package registers an hourly scheduler job that dispatches delivery strategies for all published, non-expired notifications. Each strategy attempts channels in order — if a channel times out, the next one is tried. The scheduler runs automatically once the tool is registered.
+
+## Requirements
+
+- PHP **8.2** or higher
+- Laravel Nova **5.4** or higher
+- A Laravel application served over **HTTPS** if you use the Web Push channel (service workers require a secure context)
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install via Composer and register the tool with Nova.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Create your first notification in under 5 minutes.
+  </Card>
+</CardGroup>

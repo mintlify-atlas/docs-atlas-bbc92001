@@ -1,0 +1,116 @@
+---
+title: "Channels"
+description: "The 9 delivery channels supported by Notification Center and when to use each."
+---
+
+Notification Center supports **9 delivery channels** out of the box. Each channel maps to a dedicated notification class and is identified by a short string key used in strategy configuration and delivery records.
+
+## Channel Overview
+
+| Key | Name | Type | External credentials required |
+|-----|------|------|-------------------------------|
+| `nova` | Laravel Nova feed | In-app | No |
+| `card` | Nova dashboard card | In-app | No |
+| `webpush` | Web Push (browser) | In-app | No (HTTPS required) |
+| `email` | Email | External | Mail driver config |
+| `sms` | SMS | External | Twilio (or compatible) |
+| `call` | Voice call | External | Twilio |
+| `whatsapp` | WhatsApp | External | Twilio + Content SID |
+| `slack` | Slack | External | Slack webhook / token |
+| `teams` | Microsoft Teams | External | Teams incoming webhook |
+
+## In-App Channels
+
+These channels deliver within your application and require no third-party credentials.
+
+<CardGroup cols={3}>
+  <Card title="nova" icon="bell">
+    Delivers to the Laravel Nova notification feed. Best for persistent, user-visible records inside the Nova admin panel.
+  </Card>
+  <Card title="card" icon="rectangle-list">
+    Renders a notification card directly on the Nova dashboard. Ideal for urgent messages that should be impossible to miss.
+  </Card>
+  <Card title="webpush" icon="globe">
+    Sends a browser push notification via the Web Push protocol. Reaches users even when they are not actively using the app.
+
+    <Warning>
+      Web Push requires your application to be served over **HTTPS**. The package registers a service worker at `/sw.js` and subscription endpoints automatically.
+    </Warning>
+  </Card>
+</CardGroup>
+
+## External Channels
+
+These channels deliver outside your application and require credentials configured in your environment or service provider.
+
+<AccordionGroup>
+  <Accordion title="email">
+    Sends a standard email using Laravel's mail system. Configure your preferred mail driver (SMTP, SES, Mailgun, etc.) in `config/mail.php`.
+
+    **Identifier:** `email`
+  </Accordion>
+
+  <Accordion title="sms">
+    Sends an SMS message. Requires a compatible SMS provider configured via Laravel Notifications (e.g., Twilio).
+
+    **Identifier:** `sms`
+  </Accordion>
+
+  <Accordion title="call">
+    Places a voice call using Twilio's TwiML. The package registers a TwiML endpoint at `POST /twiml/call-notification/{id}`.
+
+    **Identifier:** `call`
+  </Accordion>
+
+  <Accordion title="whatsapp">
+    Sends a WhatsApp message via Twilio. Requires both Twilio credentials and a **Content Template SID** set in config.
+
+    ```bash
+    TWILIO_WHATSAPP_CONTENT_SID=HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    ```
+
+    **Identifier:** `whatsapp`
+  </Accordion>
+
+  <Accordion title="slack">
+    Posts a message to a Slack channel. Configure the webhook URL or bot token via your notification routing.
+
+    **Identifier:** `slack`
+  </Accordion>
+
+  <Accordion title="teams">
+    Posts a message to a Microsoft Teams channel via an incoming webhook.
+
+    **Identifier:** `teams`
+  </Accordion>
+</AccordionGroup>
+
+## Channel Registration
+
+All nine channels are registered in `config/notification-center.php` under the `messages` key. Each key maps to the notification class that handles delivery for that channel:
+
+```php
+'messages' => [
+    'nova'      => \Opscale\NotificationCenter\Notifications\NovaNotification::class,
+    'card'      => \Opscale\NotificationCenter\Notifications\CardNotification::class,
+    'email'     => \Opscale\NotificationCenter\Notifications\EmailNotification::class,
+    'sms'       => \Opscale\NotificationCenter\Notifications\SmsNotification::class,
+    'call'      => \Opscale\NotificationCenter\Notifications\CallNotification::class,
+    'whatsapp'  => \Opscale\NotificationCenter\Notifications\WhatsAppNotification::class,
+    'webpush'   => \Opscale\NotificationCenter\Notifications\WebPushNotification::class,
+    'slack'     => \Opscale\NotificationCenter\Notifications\SlackNotification::class,
+    'teams'     => \Opscale\NotificationCenter\Notifications\TeamsNotification::class,
+],
+```
+
+You can replace any class with your own implementation as long as it extends `Opscale\NotificationCenter\Notifications\Notification`.
+
+## Web Push Routes
+
+The following routes are registered automatically to support the `webpush` channel:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/sw.js` | Serves the service worker script |
+| `GET` | `/webpush/subscribe/{profileId}` | Returns the VAPID public key |
+| `POST` | `/webpush/register/{profileId}` | Registers a push subscription |

@@ -1,0 +1,195 @@
+---
+title: "SendDelivery"
+description: "Job that executes a single delivery attempt for a specific channel and profile."
+---
+
+## Overview
+
+`Opscale\NotificationCenter\Jobs\SendDelivery` is responsible for sending one notification to one profile via one channel. It is dispatched by `ExecuteNotificationStrategy` and records the outcome through the `TrackEvent` service action, which updates the `Delivery` model's status accordingly.
+
+```php
+use Opscale\NotificationCenter\Jobs\SendDelivery;
+
+SendDelivery::dispatch($delivery);
+```
+
+---
+
+## Class signature
+
+```php
+class SendDelivery implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public function __construct(
+        protected Delivery $delivery,
+    );
+
+    public function handle(): void;
+}
+```
+
+---
+
+## Constructor
+
+<ParamField path="delivery" type="Opscale\NotificationCenter\Models\Delivery" required>
+  The `Delivery` model representing the specific channel-profile pair for this attempt. The job reads `delivery->notification->type` to look up the matching queue in `config('notification-center.strategies')` and places itself on that queue.
+</ParamField>
+
+**Queue assignment** mirrors `ExecuteNotificationStrategy` — the same strategy queue is used:
+
+```php
+$type  = strtolower($this->delivery->notification->type->value ?? 'transactional');
+$queue = config("notification-center.strategies.{$type}.queue", 'notifications');
+$this->onQueue($queue);
+```
+
+If the notification type cannot be resolved, the job falls back to the `transactional` strategy queue.
+
+---
+
+## How it works
+
+<Steps>
+  <Step title="Resolve the notification class">
+    `handle()` reads the channel name from the delivery and looks it up in the `notification-center.messages` map:
+
+    ```php
+    $channel          = $this->delivery->channel;
+    $messages         = config('notification-center.messages', []);
+    $notificationClass = $messages[$channel];
+    ```
+
+    If no class is registered for the channel the job returns silently.
+  </Step>
+
+  <Step title="Resolve the profile">
+    The profile is loaded from the delivery relationship:
+
+    ```php
+    $profile = $this->delivery->profile;
+    ```
+
+    If the profile cannot be found the job returns silently without throwing.
+  </Step>
+
+  <Step title="Send the notification">
+    The notification class is instantiated with the `Delivery` model and dispatched via Laravel's `notify()` method on the profile:
+
+    ```php
+    $profile->notify(new $notificationClass($this->delivery));
+    ```
+
+    Laravel's notification system then fires `NotificationSent` or `NotificationFailed` events, which are picked up by the `TrackEvent` listener to update the delivery status.
+  </Step>
+</Steps>
+
+---
+
+## Delivery status transitions
+
+The `Delivery` model progresses through the following statuses. Transitions are enforced by `DeliveryStatus::canTransitionTo()` — invalid transitions are logged as warnings and silently rejected.
+
+```php
+enum DeliveryStatus: string
+{
+    case PENDING  = 'Pending';   // queued, waiting to be sent
+    case FAILED   = 'Failed';    // could not be delivered
+    case SENT     = 'Sent';      // handed off to the channel provider
+    case RECEIVED = 'Received';  // confirmed received by the recipient
+    case OPENED   = 'Opened';    // recipient opened/viewed the notification
+    case VERIFIED = 'Verified';  // recipient read or acknowledged the notification
+    case EXPIRED  = 'Expired';   // timed out before being verified
+}
+```
+
+**Allowed transitions:**
+
+| From | Allowed next statuses |
+|---|---|
+| `PENDING` | `SENT`, `FAILED`, `EXPIRED` |
+| `SENT` | `RECEIVED`, `OPENED`, `EXPIRED` |
+| `RECEIVED` | `OPENED`, `VERIFIED`, `EXPIRED` |
+| `OPENED` | `VERIFIED`, `EXPIRED` |
+| `VERIFIED` | *(terminal)* |
+| `FAILED` | *(terminal)* |
+| `EXPIRED` | *(terminal)* |
+
+<Note>
+  A delivery that reaches `OPENED` or `VERIFIED` stops the channel escalation cycle in `ExecuteNotificationStrategy` — no further channels will be attempted for that profile.
+</Note>
+
+---
+
+## Retry behavior
+
+Retry settings are not baked into `SendDelivery` itself — they are configured per strategy in `notification-center.php`:
+
+| Config key | Description |
+|---|---|
+| `max_attempts` | Maximum number of delivery attempts per channel before the delivery is marked `FAILED` |
+| `retry_interval` | Seconds between retries; provide an array for escalating back-off (e.g. `[300, 1800]`) |
+
+```php
+// Example — transactional strategy
+'transactional' => [
+    'max_attempts'   => 3,
+    'retry_interval' => [300, 1800], // 5 min, then 30 min
+],
+```
+
+---
+
+## Error handling
+
+When a notification fails, Laravel dispatches a `NotificationFailed` event. The `TrackEvent` service action listens to this event and:
+
+1. Records a `Failed` event on the delivery with the exception message.
+2. Transitions the delivery status to `FAILED`.
+3. For `Alert`-type notifications, emits an additional `Log::critical` entry to alert on-call teams.
+
+```php
+// TrackEvent::handleFailed — called automatically by the event listener
+protected function handleFailed(NotificationFailed $event): void
+{
+    $this->failed([
+        'error' => $event->data['exception']?->getMessage() ?? 'Unknown error',
+    ]);
+
+    if ($type === 'Alert') {
+        Logger::critical('Critical notification failed', [...]);
+    }
+}
+```
+
+<Warning>
+  Failed deliveries are **terminal** — their status cannot be changed programmatically. Use the [ForceDelivery](/api/actions/force-delivery) Nova action to re-send a delivery that has failed.
+</Warning>
+
+---
+
+## Registered message channels
+
+The default `notification-center.messages` map ships with the following channels:
+
+| Key | Notification class |
+|---|---|
+| `nova` | `NovaNotification` |
+| `card` | `CardNotification` |
+| `email` | `EmailNotification` |
+| `sms` | `SmsNotification` |
+| `call` | `CallNotification` |
+| `whatsapp` | `WhatsAppNotification` |
+| `webpush` | `WebPushNotification` |
+| `slack` | `SlackNotification` |
+| `teams` | `TeamsNotification` |
+
+Register additional channels by adding entries to `config/notification-center.php`:
+
+```php
+'messages' => [
+    'custom-channel' => \App\Notifications\MyCustomNotification::class,
+],
+```

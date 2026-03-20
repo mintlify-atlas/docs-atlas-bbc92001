@@ -1,0 +1,100 @@
+---
+title: "Tracking"
+description: "Built-in open and action tracking with unique slugs, and optional Google Analytics GA4 integration."
+---
+
+Notification Center includes built-in delivery tracking. Every `Delivery` record is assigned two unique slugs at creation time — one for **opens** and one for **actions** — that power engagement tracking without any additional configuration.
+
+## How Tracking Works
+
+Each `Delivery` record stores two URL-safe identifiers:
+
+| Field | Purpose |
+|-------|----------|
+| `open_slug` | Recorded when the recipient opens or views the notification. |
+| `action_slug` | Recorded when the recipient clicks the call-to-action. |
+
+These slugs are embedded in notification content (e.g., as a tracking pixel URL or wrapped CTA link). When a recipient interacts with the notification, their client resolves the slug URL, the package records the event, and the delivery status advances accordingly.
+
+## Tracking Routes
+
+The following routes are registered automatically by the package:
+
+| Method | Path | Name | Description |
+|--------|------|------|-------------|
+| `GET` | `/o/{slug}` | `notification-center.track.open` | Records an open event for the matching delivery. |
+| `GET` | `/a/{slug}` | `notification-center.track.action` | Records an action event for the matching delivery. |
+| `GET` | `/notifications/{id}` | `notification-center.notifications.render` | Renders the full notification content for web-based channels. |
+
+No route registration is required in your application — these routes are loaded by the package's service provider.
+
+## The Event Model
+
+Every tracking interaction creates an `Event` record linked to the delivery:
+
+```php
+// Opscale\NotificationCenter\Models\Event
+
+$fillable = [
+    'delivery_id',  // FK to the Delivery that was interacted with
+    'name',         // Event name, e.g. "opened" or "action_clicked"
+    'payload',      // Optional JSON metadata (e.g., user agent, IP)
+];
+
+$casts = [
+    'payload' => 'array',
+];
+```
+
+The relationship chain is:
+
+```
+Delivery
+  └── has-many  Event
+                  └── belongs-to  Delivery
+```
+
+You can query all events for a notification via its deliveries:
+
+```php
+$notification->deliveries->flatMap->events;
+```
+
+## Google Analytics GA4 Integration
+
+Notification Center can automatically include the Google Analytics `gtag.js` snippet in rendered notifications. Set your GA4 Measurement ID in your environment:
+
+```bash
+GOOGLE_ANALYTICS_ID=G-XXXXXXXXXX
+```
+
+This value is read by the config:
+
+```php
+// config/notification-center.php
+'google_analytics_id' => env('GOOGLE_ANALYTICS_ID'),
+```
+
+When `GOOGLE_ANALYTICS_ID` is set, the `gtag.js` script is injected into notifications rendered via the `/notifications/{id}` route. Page views and events fired within the rendered notification will flow into your GA4 property.
+
+<Note>
+  GA4 integration applies to web-rendered notifications (the `renderNotification` route). Push and channel-native deliveries (SMS, WhatsApp, etc.) are tracked exclusively through the slug-based open and action routes.
+</Note>
+
+## Viewing Tracking Data in Nova
+
+<Steps>
+  <Step title="Open a notification">
+    Navigate to **Notifications** in the Nova sidebar and select a published notification.
+  </Step>
+  <Step title="View deliveries">
+    The **Deliveries** relationship panel lists every delivery record with its current status (`Pending`, `Sent`, `Opened`, `Verified`, etc.).
+  </Step>
+  <Step title="Inspect events">
+    Open an individual delivery to see the **Events** panel, showing every tracked interaction (opens, actions) with timestamps and payload data.
+  </Step>
+</Steps>
+
+<Tip>
+  Delivery statuses are updated as tracking events are recorded. A delivery moves from `Sent` → `Opened` when the open slug is resolved, and from `Opened` → `Verified` when the action slug is resolved.
+</Tip>

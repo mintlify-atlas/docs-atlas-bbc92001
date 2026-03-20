@@ -1,0 +1,180 @@
+---
+title: "Publishing notifications"
+description: "Create a notification, attach audiences, and publish it through the Nova dashboard."
+---
+
+Publishing a notification is a four-step workflow: create a content template, create the notification record, attach one or more audiences, and trigger delivery. Once published, an `ExecuteNotificationStrategy` job is dispatched for each attached audience profile and the notification status moves from **Draft** to **Published**.
+
+## End-to-end workflow
+
+<Steps>
+  <Step title="Create a content template">
+    Notifications pull their fields from [Nova Dynamic Resources](https://github.com/opscale-co/nova-dynamic-resources) templates. Before creating a notification, define a template that describes the fields your content team needs.
+
+    Refer to the `templates` section of `config/notification-center.php` for template configuration.
+  </Step>
+
+  <Step title="Create a notification record">
+    Navigate to **Notification Center → Notifications → New Notification** in the Nova sidebar.
+
+    Fill in the core fields:
+
+    | Field | Validation | Notes |
+    |-------|------------|-------|
+    | **Subject** | required, max 50 chars | Displayed as the notification title |
+    | **Body** | required | Rich-text content via Trix editor |
+    | **Summary** | required, max 100 chars | Short plain-text description used by push/WhatsApp channels |
+
+    Expand the **Advanced Settings** panel to configure optional fields:
+
+    ```php
+    // src/Nova/Notification.php — Advanced Settings panel fields
+    DateTime::make(__('Expiration'), 'expiration')
+        ->displayUsing(fn ($value) => $value?->diffForHumans())
+        ->rules('nullable', 'date'),
+
+    Text::make(__('Action'), 'action')
+        ->rules('nullable', 'url', 'max:255')
+        ->hideFromIndex(),
+
+    Select::make(__('Type'), 'type')
+        ->options([
+            NotificationType::MARKETING->value   => __('Marketing'),
+            NotificationType::TRANSACTIONAL->value => __('Transactional'),
+            NotificationType::SYSTEM->value      => __('System'),
+            NotificationType::ALERT->value       => __('Alert'),
+            NotificationType::REMINDER->value    => __('Reminder'),
+        ])
+        ->default(NotificationType::TRANSACTIONAL->value),
+    ```
+
+    <Note>
+      The **Type** field determines which delivery strategy is used. Each type maps to a strategy defined in `config/notification-center.php` under the `strategies` key, controlling which channels are attempted and in what order.
+    </Note>
+
+    Save the notification. Its status is **Draft** at this point — it cannot be edited or deleted once published.
+  </Step>
+
+  <Step title="Attach audiences and publish">
+    Open the notification's detail view. Click **Actions → Publish Notification**.
+
+    A modal appears with a single required field:
+
+    ```php
+    // src/Nova/Actions/PublishNotification.php
+    Select::make(__('Audience'), 'audience_id')
+        ->options(Audience::pluck('name', 'id'))
+        ->rules('required')
+        ->help(__('Select the audience to send the notification to.')),
+    ```
+
+    Select the audience you want to target and confirm. The action:
+
+    1. Sets the notification `status` to `PUBLISHED`.
+    2. Attaches the selected audience via `$notification->audiences()->attach($audience->id)`.
+    3. Dispatches `ExecuteNotificationStrategy::dispatch($notification)` for immediate processing.
+
+    <Tip>
+      The **Publish Notification** action is only available on the resource **detail view** (`$onlyOnDetail = true`), not from the index list.
+    </Tip>
+  </Step>
+
+  <Step title="Monitor deliveries">
+    After publishing, switch to the **Deliveries** tab on the notification detail view. Three metrics cards appear on detail:
+
+    - **Total Targets** — number of profiles targeted
+    - **Deliveries Per Day** — daily delivery trend chart
+    - **Deliveries By Status** — breakdown by status (pending, sent, received, failed)
+
+    If a delivery needs to be re-sent manually, open the delivery record and run **Actions → Force Delivery**. This immediately dispatches the notification class configured for the delivery's channel:
+
+    ```php
+    // src/Nova/Actions/ForceDelivery.php
+    $notificationClass = $messages[$channel]; // from config('notification-center.messages')
+    $profile->notify(new $notificationClass($delivery));
+    ```
+  </Step>
+</Steps>
+
+## Notification type and delivery strategy
+
+The notification **Type** field links directly to a strategy entry in config. Here are the defaults:
+
+```php
+// config/notification-center.php
+'strategies' => [
+    'marketing' => [
+        'queue'               => 'notifications-marketing',
+        'channels'            => ['email'],
+        'retry_interval'      => [3600],
+        'max_attempts'        => 1,
+        'timeout_per_channel' => 24,
+        'days'                => [1, 2, 3, 4, 5],
+        'hours'               => ['09:00', '18:00'],
+    ],
+    'transactional' => [
+        'queue'               => 'notifications-transactional',
+        'channels'            => ['nova'],
+        'retry_interval'      => [300, 1800],
+        'max_attempts'        => 3,
+        'timeout_per_channel' => 2,
+        'days'                => [0, 1, 2, 3, 4, 5, 6],
+        'hours'               => ['00:00', '23:59'],
+    ],
+    'alert' => [
+        'queue'               => 'notifications-alert',
+        'channels'            => ['webpush', 'whatsapp', 'card'],
+        'retry_interval'      => [30, 300, 900],
+        'max_attempts'        => 3,
+        'timeout_per_channel' => 1,
+        'days'                => [0, 1, 2, 3, 4, 5, 6],
+        'hours'               => ['00:00', '23:59'],
+    ],
+],
+```
+
+Each strategy defines:
+
+- **channels** — ordered list; if a channel times out, the next one is attempted (automatic escalation).
+- **retry\_interval** — seconds between retries, supports escalating delays as an array.
+- **max\_attempts** — maximum delivery attempts per channel.
+- **timeout\_per\_channel** — hours before a channel attempt is considered timed-out.
+- **days / hours** — time window restricting when notifications can be sent.
+
+<Info>
+  The scheduler re-dispatches strategies **hourly** for all published, non-expired notifications, so any notification that failed delivery will be retried automatically within its configured time window.
+</Info>
+
+## Setting an expiry date
+
+Use the **Expiration** field in Advanced Settings to prevent stale notifications from being delivered. Once a notification's expiration datetime has passed, the scheduler skips it during hourly re-dispatch.
+
+## What happens after publishing
+
+```
+PublishNotification (Nova Action)
+  │
+  ├─ notification.status → PUBLISHED
+  ├─ notification.audiences().attach(audience_id)
+  └─ ExecuteNotificationStrategy::dispatch(notification)
+       │
+       └─ Resolves audience profiles
+            └─ For each profile: SendDelivery job per channel
+```
+
+Editing or deleting a published notification is prevented at the authorization level:
+
+```php
+// src/Nova/Notification.php
+public function authorizedToUpdate(Request $request): bool
+{
+    return $this->resource->status !== NotificationStatus::PUBLISHED
+        && parent::authorizedToUpdate($request);
+}
+
+public function authorizedToDelete(Request $request): bool
+{
+    return $this->resource->status !== NotificationStatus::PUBLISHED
+        && parent::authorizedToDelete($request);
+}
+```
